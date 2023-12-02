@@ -2018,31 +2018,93 @@ _libssh2_wincng_ecdsa_curve_name_with_octal_new(
 
 int
 _libssh2_wincng_ecdh_gen_k(
-    _libssh2_bn** k,
+    _libssh2_bn** secret,
     _libssh2_ec_key* privatekey,
     const unsigned char* server_publickey_encoded,
     size_t server_publickey_encoded_len)
 {
     int result = LIBSSH2_ERROR_NONE;
+    NTSTATUS status;
 
-    BCRYPT_KEY_HANDLE key;
+    BCRYPT_KEY_HANDLE publickey;
     libssh2_curve_type curve;
+    BCRYPT_SECRET_HANDLE agreed_secret = NULL;
+    ULONG secret_len;
 
     /* Decode the public key */
     result = _libssh2_wincng_publickey_from_uncompressed_point(
         server_publickey_encoded,
         server_publickey_encoded_len,
         &curve,
-        &key);
+        &publickey);
     if (result != LIBSSH2_ERROR_NONE) {
         return result;
     }
 
-    // TODO: Implement
-    // Cf. _libssh2_dh_secret
-    // Cf. https://stackoverflow.com/questions/38115602/exporting-shared-secret-as-byte-array-from-bcrypt-secret-handle
-    DebugBreak();
-    return 0;
+    /* Establish the shared secret between ourselves and the peer */
+    status = BCryptSecretAgreement(
+        privatekey,
+        publickey,
+        &agreed_secret,
+        0);
+    if (!BCRYPT_SUCCESS(status)) {
+        result = LIBSSH2_ERROR_PUBLICKEY_PROTOCOL;
+        goto cleanup;
+    }
+
+    /* Compute the size of the buffer that is needed to hold the derived
+     * shared secret. */
+    status = BCryptDeriveKey(
+        agreed_secret,
+        BCRYPT_KDF_RAW_SECRET,
+        NULL,
+        NULL,
+        0,
+        &secret_len,
+        0);
+    if (!BCRYPT_SUCCESS(status)) {
+        result = LIBSSH2_ERROR_PUBLICKEY_PROTOCOL;
+        goto cleanup;
+    }
+
+    /* Allocate a secret bignum to be ready to receive the derived secret */
+    *secret = _libssh2_wincng_bignum_init();
+    if (!*secret) {
+        result = LIBSSH2_ERROR_ALLOC;
+        goto cleanup;
+    }
+
+    if (_libssh2_wincng_bignum_resize(secret, secret_len)) {
+        result = LIBSSH2_ERROR_ALLOC;
+        goto cleanup;
+    }
+
+    /* And populate the secret bignum */
+    status = BCryptDeriveKey(
+        agreed_secret,
+        BCRYPT_KDF_RAW_SECRET,
+        NULL,
+        (*secret)->bignum,
+        secret_len,
+        &secret_len,
+        0);
+    if (!BCRYPT_SUCCESS(status)) {
+        result = LIBSSH2_ERROR_PUBLICKEY_PROTOCOL;
+        goto cleanup;
+    }
+
+    result = LIBSSH2_ERROR_NONE;
+
+cleanup:
+    if (result != LIBSSH2_ERROR_NONE && agreed_secret) {
+        _libssh2_wincng_bignum_free(*secret);
+    }
+
+    if (result != LIBSSH2_ERROR_NONE && agreed_secret) {
+        BCryptDestroySecret(agreed_secret);
+    }
+
+    return result;
 }
 
 
