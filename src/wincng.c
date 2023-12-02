@@ -394,7 +394,8 @@ _libssh2_wincng_init(void)
     if(!BCRYPT_SUCCESS(ret)) {
         _libssh2_wincng.hAlgDH = NULL;
     }
-
+    // TODO: Use table instead?
+    // TODO: Close handles.
     ret = BCryptOpenAlgorithmProvider(&_libssh2_wincng.hAlgECDSA[LIBSSH2_EC_CURVE_NISTP256],
         BCRYPT_ECDSA_P256_ALGORITHM, NULL, 0);
     if (!BCRYPT_SUCCESS(ret)) {
@@ -411,6 +412,24 @@ _libssh2_wincng_init(void)
         BCRYPT_ECDSA_P521_ALGORITHM, NULL, 0);
     if (!BCRYPT_SUCCESS(ret)) {
         _libssh2_wincng.hAlgECDSA[LIBSSH2_EC_CURVE_NISTP521] = NULL;
+    }
+
+    ret = BCryptOpenAlgorithmProvider(&_libssh2_wincng.hAlgECDH[LIBSSH2_EC_CURVE_NISTP256],
+        BCRYPT_ECDH_P256_ALGORITHM, NULL, 0);
+    if (!BCRYPT_SUCCESS(ret)) {
+        _libssh2_wincng.hAlgECDH[LIBSSH2_EC_CURVE_NISTP256] = NULL;
+    }
+
+    ret = BCryptOpenAlgorithmProvider(&_libssh2_wincng.hAlgECDH[LIBSSH2_EC_CURVE_NISTP384],
+        BCRYPT_ECDH_P384_ALGORITHM, NULL, 0);
+    if (!BCRYPT_SUCCESS(ret)) {
+        _libssh2_wincng.hAlgECDH[LIBSSH2_EC_CURVE_NISTP384] = NULL;
+    }
+
+    ret = BCryptOpenAlgorithmProvider(&_libssh2_wincng.hAlgECDH[LIBSSH2_EC_CURVE_NISTP521],
+        BCRYPT_ECDH_P521_ALGORITHM, NULL, 0);
+    if (!BCRYPT_SUCCESS(ret)) {
+        _libssh2_wincng.hAlgECDH[LIBSSH2_EC_CURVE_NISTP521] = NULL;
     }
 }
 
@@ -1704,6 +1723,12 @@ _libssh2_wincng_dsa_free(libssh2_dsa_ctx *dsa)
 
 #if LIBSSH2_ECDSA
 
+typedef enum {
+    WINCNG_KEYTYPE_ECDSA = 0,
+    WINCNG_KEYTYPE_ECDH = 1,
+} wincng_ecc_keytype;
+
+// TODO: Merge into _libssh2_wincng_ctx?
 typedef struct {
     /* Idenfifier used by CNG API (BCRYPT_ECDSA_P256_*) */
     wchar_t* identifier;
@@ -1711,15 +1736,15 @@ typedef struct {
     /* Key length, in bits */
     ULONG key_length;
 
-    /** Magic for key import */
-    ULONG public_magic;
-} _libssh2_ecdsa_algorithm;
+    /** Magic for key import, indexed by wincng_ecc_keytype */
+    ULONG import_magic[2];
+} _libssh2_ecc_algorithm;
 
 /* Supported algorithms, indexed by libssh2_curve_type */
-static _libssh2_ecdsa_algorithm _libssh2_ecdsa_algorithms[] = {
-    { BCRYPT_ECDSA_P256_ALGORITHM, 256, BCRYPT_ECDSA_PUBLIC_P256_MAGIC },
-    { BCRYPT_ECDSA_P384_ALGORITHM, 384, BCRYPT_ECDSA_PUBLIC_P384_MAGIC },
-    { BCRYPT_ECDSA_P521_ALGORITHM, 521, BCRYPT_ECDSA_PUBLIC_P521_MAGIC },
+static _libssh2_ecc_algorithm _libssh2_ecdsa_algorithms[] = {
+    { BCRYPT_ECDSA_P256_ALGORITHM, 256, { BCRYPT_ECDSA_PUBLIC_P256_MAGIC, BCRYPT_ECDH_PUBLIC_P256_MAGIC }},
+    { BCRYPT_ECDSA_P384_ALGORITHM, 384, { BCRYPT_ECDSA_PUBLIC_P384_MAGIC, BCRYPT_ECDH_PUBLIC_P384_MAGIC }},
+    { BCRYPT_ECDSA_P521_ALGORITHM, 521, { BCRYPT_ECDSA_PUBLIC_P521_MAGIC, BCRYPT_ECDH_PUBLIC_P521_MAGIC }},
 };
 
 /*
@@ -1727,6 +1752,7 @@ static _libssh2_ecdsa_algorithm _libssh2_ecdsa_algorithms[] = {
  */
 static int
 _libssh2_wincng_publickey_from_uncompressed_point(
+    IN wincng_ecc_keytype keytype,
     IN const unsigned char* encoded_point,
     IN ULONG encoded_point_len,
     OUT OPTIONAL libssh2_curve_type* key_curve,
@@ -1775,14 +1801,16 @@ _libssh2_wincng_publickey_from_uncompressed_point(
         return LIBSSH2_ERROR_ALLOC;
     }
 
-    ecc_blob->dwMagic = _libssh2_ecdsa_algorithms[curve].public_magic;
+    ecc_blob->dwMagic = _libssh2_ecdsa_algorithms[curve].import_magic[keytype];
     ecc_blob->cbKey = _libssh2_ecdsa_algorithms[curve].key_length / 8;
 
     /** Copy x, y in one go */
     memcpy((PUCHAR)ecc_blob + sizeof(BCRYPT_ECCKEY_BLOB), encoded_point + 1, encoded_point_len - 1);
 
     status = BCryptImportKeyPair(
-        _libssh2_wincng.hAlgECDSA[curve],
+        keytype == WINCNG_KEYTYPE_ECDSA
+            ? _libssh2_wincng.hAlgECDSA[curve]
+            : _libssh2_wincng.hAlgECDH[curve],
         NULL,
         BCRYPT_ECCPUBLIC_BLOB,
         key,
@@ -1902,7 +1930,7 @@ _libssh2_wincng_ecdsa_free(IN libssh2_ecdsa_ctx* ecdsa)
 /*
  * _libssh2_ecdsa_create_key
  *
- * Creates a local private key based on input curve
+ * Creates a local private ECDH key based on input curve
  * and returns octal value and octal length
  *
  */
@@ -1928,7 +1956,7 @@ _libssh2_wincng_ecdsa_create_key(
         return LIBSSH2_ERROR_INVAL;
     }
 
-    if (!_libssh2_wincng.hAlgECDSA[curve]) {
+    if (!_libssh2_wincng.hAlgECDH[curve]) {
         return LIBSSH2_ERROR_INVAL;
     }
 
@@ -1939,9 +1967,9 @@ _libssh2_wincng_ecdsa_create_key(
     *privatekey = NULL;
     *encoded_publickey = NULL;
 
-    /* Create a key pair using the requested curve */
+    /* Create an ECDH key pair using the requested curve */
     status = BCryptGenerateKeyPair(
-        _libssh2_wincng.hAlgECDSA[curve],
+        _libssh2_wincng.hAlgECDH[curve],
         &key,
         _libssh2_ecdsa_algorithms[curve].key_length,
         0);
@@ -1958,7 +1986,7 @@ _libssh2_wincng_ecdsa_create_key(
         result = _libssh2_error(
             session,
             LIBSSH2_ERROR_PUBLICKEY_PROTOCOL,
-            "Creating ECC key pair failed");
+            "Creating ECDH key pair failed");
         goto cleanup;
     }
 
@@ -1972,7 +2000,7 @@ _libssh2_wincng_ecdsa_create_key(
         result = _libssh2_error(
             session,
             LIBSSH2_ERROR_PUBLICKEY_PROTOCOL,
-            "Exporting ECC key pair failed");
+            "Exporting ECDH key pair failed");
     }
 
     *privatekey = key;
@@ -2003,6 +2031,7 @@ _libssh2_wincng_ecdsa_curve_name_with_octal_new(
     UNREFERENCED_PARAMETER(curve);
 
     return _libssh2_wincng_publickey_from_uncompressed_point(
+        WINCNG_KEYTYPE_ECDH,
         publickey_encoded,
         publickey_encoded_len,
         NULL,
@@ -2033,6 +2062,7 @@ _libssh2_wincng_ecdh_gen_k(
 
     /* Decode the public key */
     result = _libssh2_wincng_publickey_from_uncompressed_point(
+        WINCNG_KEYTYPE_ECDH,
         server_publickey_encoded,
         server_publickey_encoded_len,
         &curve,
@@ -2482,7 +2512,7 @@ _libssh2_wincng_sk_pub_keyfilememory(LIBSSH2_SESSION *session,
 
 int
 _libssh2_wincng_cipher_init(_libssh2_cipher_ctx *ctx,
-                            _libssh2_cipher_type(type),
+                            _libssh2_cipher_type(keytype),
                             unsigned char *iv,
                             unsigned char *secret,
                             int encrypt)
@@ -2495,7 +2525,7 @@ _libssh2_wincng_cipher_init(_libssh2_cipher_ctx *ctx,
 
     (void)encrypt;
 
-    ret = BCryptGetProperty(*type.phAlg, BCRYPT_OBJECT_LENGTH,
+    ret = BCryptGetProperty(*keytype.phAlg, BCRYPT_OBJECT_LENGTH,
                             (unsigned char *)&dwKeyObject,
                             sizeof(dwKeyObject),
                             &cbData, 0);
@@ -2503,7 +2533,7 @@ _libssh2_wincng_cipher_init(_libssh2_cipher_ctx *ctx,
         return -1;
     }
 
-    ret = BCryptGetProperty(*type.phAlg, BCRYPT_BLOCK_LENGTH,
+    ret = BCryptGetProperty(*keytype.phAlg, BCRYPT_BLOCK_LENGTH,
                             (unsigned char *)&dwBlockLength,
                             sizeof(dwBlockLength),
                             &cbData, 0);
@@ -2518,7 +2548,7 @@ _libssh2_wincng_cipher_init(_libssh2_cipher_ctx *ctx,
 
 
     keylen = (ULONG)sizeof(BCRYPT_KEY_DATA_BLOB_HEADER) +
-             type.dwKeyLength;
+             keytype.dwKeyLength;
     header = (BCRYPT_KEY_DATA_BLOB_HEADER *)malloc(keylen);
     if(!header) {
         free(pbKeyObject);
@@ -2528,12 +2558,12 @@ _libssh2_wincng_cipher_init(_libssh2_cipher_ctx *ctx,
 
     header->dwMagic = BCRYPT_KEY_DATA_BLOB_MAGIC;
     header->dwVersion = BCRYPT_KEY_DATA_BLOB_VERSION1;
-    header->cbKeyData = type.dwKeyLength;
+    header->cbKeyData = keytype.dwKeyLength;
 
     memcpy((unsigned char *)header + sizeof(BCRYPT_KEY_DATA_BLOB_HEADER),
-           secret, type.dwKeyLength);
+           secret, keytype.dwKeyLength);
 
-    ret = BCryptImportKey(*type.phAlg, NULL, BCRYPT_KEY_DATA_BLOB, &hKey,
+    ret = BCryptImportKey(*keytype.phAlg, NULL, BCRYPT_KEY_DATA_BLOB, &hKey,
                           pbKeyObject, dwKeyObject,
                           (PUCHAR)header, keylen, 0);
 
@@ -2549,7 +2579,7 @@ _libssh2_wincng_cipher_init(_libssh2_cipher_ctx *ctx,
     dwIV = 0;
     dwCtrLength = 0;
 
-    if(type.useIV || type.ctrMode) {
+    if(keytype.useIV || keytype.ctrMode) {
         pbIVCopy = malloc(dwBlockLength);
         if(!pbIVCopy) {
             BCryptDestroyKey(hKey);
@@ -2558,11 +2588,11 @@ _libssh2_wincng_cipher_init(_libssh2_cipher_ctx *ctx,
         }
         memcpy(pbIVCopy, iv, dwBlockLength);
 
-        if(type.ctrMode) {
+        if(keytype.ctrMode) {
             pbCtr = pbIVCopy;
             dwCtrLength = dwBlockLength;
         }
-        else if(type.useIV) {
+        else if(keytype.useIV) {
             pbIV = pbIVCopy;
             dwIV = dwBlockLength;
         }
@@ -2582,7 +2612,7 @@ _libssh2_wincng_cipher_init(_libssh2_cipher_ctx *ctx,
 
 int
 _libssh2_wincng_cipher_crypt(_libssh2_cipher_ctx *ctx,
-                             _libssh2_cipher_type(type),
+                             _libssh2_cipher_type(keytype),
                              int encrypt,
                              unsigned char *block,
                              size_t blocklen, int firstlast)
@@ -2591,19 +2621,19 @@ _libssh2_wincng_cipher_crypt(_libssh2_cipher_ctx *ctx,
     ULONG cbOutput, cbInput;
     int ret;
 
-    (void)type;
+    (void)keytype;
     (void)firstlast;
 
     cbInput = (ULONG)blocklen;
 
-    if(type.ctrMode) {
+    if(keytype.ctrMode) {
         pbInput = ctx->pbCtr;
     }
     else {
         pbInput = block;
     }
 
-    if(encrypt || type.ctrMode) {
+    if(encrypt || keytype.ctrMode) {
         ret = BCryptEncrypt(ctx->hKey, pbInput, cbInput, NULL,
                             ctx->pbIV, ctx->dwIV, NULL, 0, &cbOutput, 0);
     }
@@ -2614,7 +2644,7 @@ _libssh2_wincng_cipher_crypt(_libssh2_cipher_ctx *ctx,
     if(BCRYPT_SUCCESS(ret)) {
         pbOutput = malloc(cbOutput);
         if(pbOutput) {
-            if(encrypt || type.ctrMode) {
+            if(encrypt || keytype.ctrMode) {
                 ret = BCryptEncrypt(ctx->hKey, pbInput, cbInput, NULL,
                                     ctx->pbIV, ctx->dwIV,
                                     pbOutput, cbOutput, &cbOutput, 0);
@@ -2625,7 +2655,7 @@ _libssh2_wincng_cipher_crypt(_libssh2_cipher_ctx *ctx,
                                     pbOutput, cbOutput, &cbOutput, 0);
             }
             if(BCRYPT_SUCCESS(ret)) {
-                if(type.ctrMode) {
+                if(keytype.ctrMode) {
                     _libssh2_xor_data(block, block, pbOutput, blocklen);
                     _libssh2_aes_ctr_increment(ctx->pbCtr, ctx->dwCtrLength);
                 }

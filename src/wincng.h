@@ -115,6 +115,7 @@ struct _libssh2_wincng_ctx {
     BCRYPT_ALG_HANDLE hAlgRC4_NA;
     BCRYPT_ALG_HANDLE hAlg3DES_CBC;
     BCRYPT_ALG_HANDLE hAlgDH;
+    BCRYPT_ALG_HANDLE hAlgECDH[3]; /* indexed by libssh2_curve_type */
     BCRYPT_ALG_HANDLE hAlgECDSA[3]; /* indexed by libssh2_curve_type */
     volatile int hasAlgDHwithKDF; /* -1=no, 0=maybe, 1=yes */
 };
