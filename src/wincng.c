@@ -1710,17 +1710,20 @@ typedef struct {
 
     /* Key length, in bits */
     ULONG key_length;
+
+    /** Magic for key import */
+    ULONG public_magic;
 } _libssh2_ecdsa_algorithm;
 
 /* Supported algorithms, indexed by libssh2_curve_type */
 static _libssh2_ecdsa_algorithm _libssh2_ecdsa_algorithms[] = {
-    { BCRYPT_ECDSA_P256_ALGORITHM, 256 },
-    { BCRYPT_ECDSA_P384_ALGORITHM, 384 },
-    { BCRYPT_ECDSA_P521_ALGORITHM, 521 },
+    { BCRYPT_ECDSA_P256_ALGORITHM, 256, BCRYPT_ECDSA_PUBLIC_P256_MAGIC },
+    { BCRYPT_ECDSA_P384_ALGORITHM, 384, BCRYPT_ECDSA_PUBLIC_P384_MAGIC },
+    { BCRYPT_ECDSA_P521_ALGORITHM, 521, BCRYPT_ECDSA_PUBLIC_P521_MAGIC },
 };
 
 void
-_libssh2_wincng_ecdsa_free(libssh2_ecdsa_ctx* ecdsa)
+_libssh2_wincng_ecdsa_free(IN libssh2_ecdsa_ctx* ecdsa)
 {
     if (!ecdsa) {
         return;
@@ -1739,11 +1742,11 @@ _libssh2_wincng_ecdsa_free(libssh2_ecdsa_ctx* ecdsa)
  */
 
 int
-_libssh2_wincng_ecdsa_create_key(LIBSSH2_SESSION* session,
-                                 _libssh2_ec_key** privkey,
-                                 unsigned char** pubkey,
-                                 size_t* pubkey_len,
-                                 libssh2_curve_type curve)
+_libssh2_wincng_ecdsa_create_key(IN LIBSSH2_SESSION* session,
+                                 OUT _libssh2_ec_key** privkey,
+                                 OUT unsigned char** pubkey,
+                                 OUT size_t* pubkey_len,
+                                 IN libssh2_curve_type curve)
 {
     int result = LIBSSH2_ERROR_NONE;
     NTSTATUS status;
@@ -1810,7 +1813,7 @@ _libssh2_wincng_ecdsa_create_key(LIBSSH2_SESSION* session,
         status = BCryptExportKey(key,
                                  NULL,
                                  BCRYPT_ECCPUBLIC_BLOB,
-                                 ecc_blob,
+                                 (PUCHAR)ecc_blob,
                                  ecc_blob_len,
                                  &ecc_blob_len,
                                  0);
@@ -1868,18 +1871,69 @@ cleanup:
  * _libssh2_ecdsa_curve_name_with_octal_new
  *
  * Creates a new public key given an octal string, length and type
- *
  */
 
 int
-_libssh2_wincng_ecdsa_curve_name_with_octal_new(libssh2_ecdsa_ctx** ctx,
-                                                 const unsigned char* k,
-                                                 size_t k_len,
-                                                 libssh2_curve_type curve)
+_libssh2_wincng_ecdsa_curve_name_with_octal_new(OUT libssh2_ecdsa_ctx** ctx,
+                                                IN const unsigned char* encoded_point,
+                                                IN size_t encoded_point_len,
+                                                IN libssh2_curve_type curve)
 {
-    // TODO: Implement
-    DebugBreak();
-    return 0;
+    int result = LIBSSH2_ERROR_NONE;
+    NTSTATUS status;
+    BCRYPT_KEY_HANDLE key;
+
+    PBCRYPT_ECCKEY_BLOB ecc_blob;
+    ULONG ecc_blob_len;
+
+    *ctx = NULL;
+
+    /* Validate parameters */
+    if (curve >= _countof(_libssh2_ecdsa_algorithms)) {
+        return LIBSSH2_ERROR_INVAL;
+    }
+
+    if (encoded_point_len != 2 * _libssh2_ecdsa_algorithms[curve].key_length / 8 + 1) {
+        return LIBSSH2_ERROR_INVAL;
+    }
+
+    if (encoded_point[0] != 4) {
+        /* Not an uncompressed point. */
+        return LIBSSH2_ERROR_INVAL;
+    }
+
+    /* Initialize a blob to import */
+    ecc_blob_len = sizeof(BCRYPT_ECCKEY_BLOB) + 2 * _libssh2_ecdsa_algorithms[curve].key_length;
+    ecc_blob = malloc(ecc_blob_len);
+    if (!ecc_blob) {
+        result = LIBSSH2_ERROR_ALLOC;
+        goto cleanup;
+    }
+
+    ecc_blob->dwMagic = _libssh2_ecdsa_algorithms[curve].public_magic;
+    ecc_blob->cbKey = _libssh2_ecdsa_algorithms[curve].key_length / 8;
+
+    /** Copy x, y in one go */
+    memcpy((PUCHAR)ecc_blob + sizeof(BCRYPT_ECCKEY_BLOB), encoded_point + 1, encoded_point_len - 1);
+
+    status = BCryptImportKeyPair(
+        _libssh2_wincng.hAlgECDSA[curve],
+        NULL,
+        BCRYPT_ECCPUBLIC_BLOB,
+        &key,
+        (PUCHAR)ecc_blob,
+        ecc_blob_len,
+        0);
+    if (!BCRYPT_SUCCESS(status)) {
+        result = LIBSSH2_ERROR_PUBLICKEY_PROTOCOL;
+        goto cleanup;
+    }
+
+    *ctx = key;
+
+cleanup:
+
+    return result;
 }
 
 /*
