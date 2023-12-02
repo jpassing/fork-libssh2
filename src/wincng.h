@@ -71,7 +71,7 @@
 #define LIBSSH2_RSA_SHA1 1
 #define LIBSSH2_RSA_SHA2 1
 #define LIBSSH2_DSA 1
-#define LIBSSH2_ECDSA 0
+#define LIBSSH2_ECDSA 1
 #define LIBSSH2_ED25519 0
 
 #include "crypto_config.h"
@@ -115,6 +115,7 @@ struct _libssh2_wincng_ctx {
     BCRYPT_ALG_HANDLE hAlgRC4_NA;
     BCRYPT_ALG_HANDLE hAlg3DES_CBC;
     BCRYPT_ALG_HANDLE hAlgDH;
+    BCRYPT_ALG_HANDLE hAlgECDSA[3]; /* indexed by libssh2_curve_type */
     volatile int hasAlgDHwithKDF; /* -1=no, 0=maybe, 1=yes */
 };
 
@@ -312,6 +313,55 @@ typedef struct __libssh2_wincng_key_ctx {
     _libssh2_wincng_dsa_sha1_verify(dsactx, sig, m, m_len)
 #define _libssh2_dsa_free(dsactx) \
     _libssh2_wincng_dsa_free(dsactx)
+
+
+/*
+ * Windows CNG backend: ECDSA functions
+ */
+
+#define libssh2_ecdsa_ctx _libssh2_wincng_key_ctx
+
+typedef enum {
+    LIBSSH2_EC_CURVE_NISTP256 = 0, //TODO: set curve type
+    LIBSSH2_EC_CURVE_NISTP384 = 1, //TODO: set curve type
+    LIBSSH2_EC_CURVE_NISTP521 = 2, //TODO: set curve type
+}
+libssh2_curve_type;
+
+//TODO: set key type
+#define _libssh2_ec_key void 
+
+#define _libssh2_ecdsa_create_key(session, privkey, pubkey_octal, \
+                                  pubkey_octal_len, curve) \
+    _libssh2_wincng_ecdsa_create_key(session, privkey, pubkey_octal, \
+                                      pubkey_octal_len, curve)
+
+#define _libssh2_ecdsa_curve_name_with_octal_new(ctx, k, k_len, curve) \
+    _libssh2_wincng_ecdsa_curve_name_with_octal_new(ctx, k, k_len, curve)
+
+#define _libssh2_ecdh_gen_k(k, privkey, server_pubkey, server_pubkey_len) \
+    _libssh2_wincng_ecdh_gen_k(k, privkey, server_pubkey, server_pubkey_len)
+
+#define _libssh2_ecdsa_verify(ctx, r, r_len, s, s_len, m, m_len) \
+    _libssh2_wincng_ecdsa_verify(ctx, r, r_len, s, s_len, m, m_len)
+
+#define _libssh2_ecdsa_new_private(ctx, session, filename, passphrase) \
+    _libssh2_wincng_ecdsa_new_private(ctx, session, filename, passphrase)
+
+#define _libssh2_ecdsa_new_private_frommemory(ctx, session, filedata, \
+                                              filedata_len, passphrase) \
+    _libssh2_wincng_ecdsa_new_private_frommemory(ctx, session, filedata, \
+                                                  filedata_len, passphrase)
+
+#define _libssh2_ecdsa_sign(session, ctx, hash, hash_len, sign, sign_len) \
+    _libssh2_wincng_ecdsa_sign(session, ctx, hash, hash_len, sign, sign_len)
+
+#define _libssh2_ecdsa_get_curve_type(ctx) \
+    _libssh2_wincng_ecdsa_get_curve_type(ctx)
+
+#define _libssh2_ecdsa_free(ecdsactx) \
+    _libssh2_wincng_ecdsa_free(ecdsactx)
+
 
 /*
  * Windows CNG backend: Key functions
