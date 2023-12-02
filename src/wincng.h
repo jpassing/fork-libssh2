@@ -322,13 +322,13 @@ typedef struct __libssh2_wincng_key_ctx {
 #define libssh2_ecdsa_ctx _libssh2_wincng_key_ctx
 
 typedef enum {
-    LIBSSH2_EC_CURVE_NISTP256 = 0, //TODO: set curve type
-    LIBSSH2_EC_CURVE_NISTP384 = 1, //TODO: set curve type
-    LIBSSH2_EC_CURVE_NISTP521 = 2, //TODO: set curve type
+    LIBSSH2_EC_CURVE_NISTP256 = 0,
+    LIBSSH2_EC_CURVE_NISTP384 = 1,
+    LIBSSH2_EC_CURVE_NISTP521 = 2,
 }
 libssh2_curve_type;
 
-//TODO: set key type
+/* Reinterpret _libssh2_ec_key* as BCRYPT_KEY_HANDLE */
 #define _libssh2_ec_key void 
 
 #define _libssh2_ecdsa_create_key(session, privkey, pubkey_octal, \
