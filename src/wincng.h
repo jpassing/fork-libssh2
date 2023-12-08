@@ -334,7 +334,7 @@ libssh2_curve_type;
 
 #define _libssh2_ecdsa_create_key(session, privkey, pubkey_octal, \
                                   pubkey_octal_len, curve) \
-    _libssh2_wincng_ecdsa_create_key(session, privkey, pubkey_octal, \
+    _libssh2_wincng_ecdh_create_key(session, privkey, pubkey_octal, \
                                       pubkey_octal_len, curve)
 
 #define _libssh2_ecdsa_curve_name_with_octal_new(ctx, k, k_len, curve) \

@@ -1931,12 +1931,11 @@ _libssh2_wincng_ecdsa_free(IN libssh2_ecdsa_ctx* ecdsa)
  * _libssh2_ecdsa_create_key
  *
  * Creates a local private ECDH key based on input curve
- * and returns octal value and octal length
- *
+ * and returns the public key in uncompressed point encoding.
  */
 
 int
-_libssh2_wincng_ecdsa_create_key(
+_libssh2_wincng_ecdh_create_key(
     IN LIBSSH2_SESSION* session,
     OUT _libssh2_ec_key** privatekey,
     OUT unsigned char** encoded_publickey,
@@ -2013,12 +2012,10 @@ cleanup:
     return result;
 }
 
-
-
 /*
  * _libssh2_ecdsa_curve_name_with_octal_new
  *
- * Creates a new public key given an octal string, length and type
+ * Creates an ECDH public key from an uncompressed point.
  */
 
 int
@@ -2138,6 +2135,67 @@ cleanup:
 }
 
 
+static int _libssh2_wincng_create_p1363signature(
+    IN const unsigned char* r,
+    IN size_t r_len,
+    IN const unsigned char* s,
+    IN size_t s_len,
+    IN libssh2_curve_type curve,
+    OUT PUCHAR *signature,
+    OUT size_t *signature_length)
+{
+    const unsigned char* r_trimmed;
+    const unsigned char* s_trimmed;
+    size_t r_trimmed_len;
+    size_t s_trimmed_len;
+
+    /* IEEE P-1363 format is defined as r || s.
+
+       But r and s are of type mpint. This means:
+       - there might be a leading zero that must be trimmed
+       - we might need to zero-pad the value
+    */
+
+    /* Validate parameters */
+    if (curve >= _countof(_libssh2_ecdsa_algorithms)) {
+        return LIBSSH2_ERROR_INVAL;
+    }
+
+    *signature_length = _libssh2_ecdsa_algorithms[curve].key_length * 2 / 8;
+
+    /* Trim leading zero, if any */
+    r_trimmed = r;
+    r_trimmed_len = r_len;
+    if (r_len > 0 && r[0] == '\0') {
+        r_trimmed++;
+        r_trimmed_len--;
+    }
+
+    s_trimmed = s;
+    s_trimmed_len = s_len;
+    if (s_len > 0 && s[0] == '\0') {
+        s_trimmed++;
+        s_trimmed_len--;
+    }
+
+    /* Concatenate into zero-filled buffer, zero-padding if necessary */
+    *signature = calloc(1, *signature_length);
+    if (!*signature) {
+        return LIBSSH2_ERROR_ALLOC;
+    }
+
+    memcpy(
+        *signature + (*signature_length / 2) - r_trimmed_len,
+        r_trimmed,
+        r_trimmed_len);
+    memcpy(
+        *signature + (*signature_length) - s_trimmed_len,
+        s_trimmed,
+        s_trimmed_len);
+
+    return LIBSSH2_ERROR_NONE;
+}
+
 /*
  * _libssh2_ecdsa_verify
  *
@@ -2146,13 +2204,54 @@ cleanup:
  */
 
 int
-_libssh2_wincng_ecdsa_verify(libssh2_ecdsa_ctx* ctx,
-                              const unsigned char* r, size_t r_len,
-                              const unsigned char* s, size_t s_len,
-                              const unsigned char* m, size_t m_len)
+_libssh2_wincng_ecdsa_verify(
+    IN libssh2_ecdsa_ctx* ecdsa, // TODO: Don't reinterpret as HANDLE!
+    IN const unsigned char* r,
+    IN size_t r_len,
+    IN const unsigned char* s,
+    IN size_t s_len,
+    IN const unsigned char* hash,
+    IN size_t hash_len)
 {
-    // TODO: Implement
-    DebugBreak();
+    PUCHAR signature_p1363 = NULL;
+    size_t signature_p1363_len;
+    int result = LIBSSH2_ERROR_NONE;
+    NTSTATUS status;
+
+    /* CNG expects signatures in IEEE P-1363 format. */
+    result = _libssh2_wincng_create_p1363signature(
+        r,
+        r_len,
+        s,
+        s_len,
+        _libssh2_wincng_ecdsa_get_curve_type(ecdsa),
+        &signature_p1363,
+        &signature_p1363_len);
+    if (result != LIBSSH2_ERROR_NONE) {
+        goto cleanup;
+    }
+
+    status = BCryptVerifySignature(
+        (BCRYPT_KEY_HANDLE)ecdsa,
+        NULL,
+        hash,
+        hash_len,
+        signature_p1363,
+        signature_p1363_len,
+        0);
+
+    if (!BCRYPT_SUCCESS(status)) {
+        result = LIBSSH2_ERROR_PUBLICKEY_PROTOCOL;
+        goto cleanup;
+    }
+
+    result = LIBSSH2_ERROR_NONE;
+
+cleanup:
+    if (signature_p1363) {
+        free(signature_p1363);
+    }
+
     return 0;
 }
 
@@ -2223,9 +2322,9 @@ _libssh2_wincng_ecdsa_sign(LIBSSH2_SESSION* session,
 libssh2_curve_type
 _libssh2_wincng_ecdsa_get_curve_type(libssh2_ecdsa_ctx* ctx)
 {
-    // TODO: Implement
+    // TODO: Keep curve in context
     DebugBreak();
-    return 0;
+    return LIBSSH2_EC_CURVE_NISTP256;
 }
 
 
