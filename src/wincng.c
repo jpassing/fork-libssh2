@@ -1734,8 +1734,10 @@ typedef enum {
 
 // TODO: Merge into _libssh2_wincng_ctx?
 typedef struct {
-    /* Idenfifier used by CNG API (BCRYPT_ECDSA_P256_*) */
-    wchar_t* identifier;
+    /* Algorithm name */
+    char* name;
+
+    libssh2_curve_type curve;
 
     /* Key length, in bits */
     ULONG key_length;
@@ -1746,9 +1748,9 @@ typedef struct {
 
 /* Supported algorithms, indexed by libssh2_curve_type */
 static _libssh2_ecc_algorithm _libssh2_ecdsa_algorithms[] = {
-    { BCRYPT_ECDSA_P256_ALGORITHM, 256, { BCRYPT_ECDSA_PUBLIC_P256_MAGIC, BCRYPT_ECDH_PUBLIC_P256_MAGIC }},
-    { BCRYPT_ECDSA_P384_ALGORITHM, 384, { BCRYPT_ECDSA_PUBLIC_P384_MAGIC, BCRYPT_ECDH_PUBLIC_P384_MAGIC }},
-    { BCRYPT_ECDSA_P521_ALGORITHM, 521, { BCRYPT_ECDSA_PUBLIC_P521_MAGIC, BCRYPT_ECDH_PUBLIC_P521_MAGIC }},
+    { "ecdsa-sha2-nistp256", LIBSSH2_EC_CURVE_NISTP256, 256, { BCRYPT_ECDSA_PUBLIC_P256_MAGIC, BCRYPT_ECDH_PUBLIC_P256_MAGIC }},
+    { "ecdsa-sha2-nistp384", LIBSSH2_EC_CURVE_NISTP384, 384, { BCRYPT_ECDSA_PUBLIC_P384_MAGIC, BCRYPT_ECDH_PUBLIC_P384_MAGIC }},
+    { "ecdsa-sha2-nistp521", LIBSSH2_EC_CURVE_NISTP521, 521, { BCRYPT_ECDSA_PUBLIC_P521_MAGIC, BCRYPT_ECDH_PUBLIC_P521_MAGIC }},
 };
 
 /*
@@ -2287,7 +2289,7 @@ cleanup:
         free(signature_p1363);
     }
 
-    return 0;
+    return result;
 }
 
 /*
@@ -2393,12 +2395,17 @@ _libssh2_wincng_ecdsa_get_curve_type(_libssh2_wincng_ecdsa_ctx* ctx)
  */
 
 int
-_libssh2_wincng_ecdsa_curve_type_from_name(const char* name,
-                                            libssh2_curve_type* out_type)
+_libssh2_wincng_ecdsa_curve_type_from_name(
+    IN const char* name,
+    OUT libssh2_curve_type* out_type)
 {
-    // TODO: Implement
-    DebugBreak();
-    return 0;
+    for (int i = 0; i < _countof(_libssh2_ecdsa_algorithms); i++) {
+        if (strcmp(name, _libssh2_ecdsa_algorithms[i].name) == 0) {
+            return _libssh2_ecdsa_algorithms[i].curve;
+        }
+    }
+
+    return -1;
 }
 
 #endif
