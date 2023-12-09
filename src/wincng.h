@@ -320,14 +320,18 @@ typedef struct __libssh2_wincng_key_ctx {
  * Windows CNG backend: ECDSA functions
  */
 
-#define libssh2_ecdsa_ctx _libssh2_wincng_key_ctx
-
 typedef enum {
     LIBSSH2_EC_CURVE_NISTP256 = 0,
     LIBSSH2_EC_CURVE_NISTP384 = 1,
     LIBSSH2_EC_CURVE_NISTP521 = 2,
-}
-libssh2_curve_type;
+} libssh2_curve_type;
+
+typedef struct __libssh2_wincng_ecdsa_ctx {
+    BCRYPT_KEY_HANDLE hKey;
+    libssh2_curve_type curve;
+} _libssh2_wincng_ecdsa_ctx;
+
+#define libssh2_ecdsa_ctx _libssh2_wincng_ecdsa_ctx
 
 /* Reinterpret _libssh2_ec_key* as BCRYPT_KEY_HANDLE */
 #define _libssh2_ec_key void 
