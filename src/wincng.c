@@ -2298,14 +2298,21 @@ cleanup:
  */
 
 int
-_libssh2_wincng_ecdsa_new_private(_libssh2_wincng_ecdsa_ctx** ctx,
-                                   LIBSSH2_SESSION* session,
-                                   const char* filename,
-                                   const unsigned char* pwd)
+_libssh2_wincng_ecdsa_new_private(
+    OUT _libssh2_wincng_ecdsa_ctx** ctx,
+    IN LIBSSH2_SESSION* session,
+    IN const char* filename,
+    IN const unsigned char* pwd)
 {
-    // TODO: Implement
-    DebugBreak();
-    return 0;
+    UNREFERENCED_PARAMETER(ctx);
+    UNREFERENCED_PARAMETER(session);
+    UNREFERENCED_PARAMETER(filename);
+    UNREFERENCED_PARAMETER(pwd);
+
+    return _libssh2_error(
+        session,
+        LIBSSH2_ERROR_ALGO_UNSUPPORTED,
+        "Not implemented, use libssh2_userauth_publickey instead");
 }
 
 /*
@@ -2316,15 +2323,23 @@ _libssh2_wincng_ecdsa_new_private(_libssh2_wincng_ecdsa_ctx** ctx,
  */
 
 int
-_libssh2_wincng_ecdsa_new_private_frommemory(_libssh2_wincng_ecdsa_ctx** ctx,
-    LIBSSH2_SESSION* session,
-    const char* data,
-    size_t data_len,
-    const unsigned char* pwd)
+_libssh2_wincng_ecdsa_new_private_frommemory(
+    OUT _libssh2_wincng_ecdsa_ctx** ctx,
+    IN LIBSSH2_SESSION* session,
+    IN const char* data,
+    IN size_t data_len,
+    IN const unsigned char* pwd)
 {
-    // TODO: Implement
-    DebugBreak();
-    return 0;
+    UNREFERENCED_PARAMETER(ctx);
+    UNREFERENCED_PARAMETER(session);
+    UNREFERENCED_PARAMETER(data);
+    UNREFERENCED_PARAMETER(data_len);
+    UNREFERENCED_PARAMETER(pwd);
+
+    return _libssh2_error(
+        session,
+        LIBSSH2_ERROR_ALGO_UNSUPPORTED,
+        "Not implemented, use libssh2_userauth_publickey instead");
 }
 
 /*
@@ -2335,16 +2350,25 @@ _libssh2_wincng_ecdsa_new_private_frommemory(_libssh2_wincng_ecdsa_ctx** ctx,
  */
 
 int
-_libssh2_wincng_ecdsa_sign(LIBSSH2_SESSION* session,
-                            _libssh2_wincng_ecdsa_ctx* ctx,
-                            const unsigned char* hash,
-                            size_t hash_len,
-                            unsigned char** sign,
-                            size_t* sign_len)
+_libssh2_wincng_ecdsa_sign(
+    IN LIBSSH2_SESSION* session,
+    IN _libssh2_wincng_ecdsa_ctx* ctx,
+    IN const unsigned char* hash,
+    IN size_t hash_len,
+    OUT unsigned char** sign,
+    OUT size_t* sign_len)
 {
-    // TODO: Implement
-    DebugBreak();
-    return 0;
+    UNREFERENCED_PARAMETER(session);
+    UNREFERENCED_PARAMETER(ctx);
+    UNREFERENCED_PARAMETER(hash);
+    UNREFERENCED_PARAMETER(hash_len);
+    UNREFERENCED_PARAMETER(sign);
+    UNREFERENCED_PARAMETER(sign_len);
+
+    return _libssh2_error(
+        session,
+        LIBSSH2_ERROR_ALGO_UNSUPPORTED,
+        "Not implemented, use libssh2_userauth_publickey instead");
 }
 
 /*
