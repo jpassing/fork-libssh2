@@ -1781,7 +1781,7 @@ _libssh2_wincng_publickey_from_uncompressed_point(
     *key = NULL;
 
     /* Get key length in bits */
-    key_length = (encoded_point_len - 1) / 2 * 8;
+    key_length = (encoded_point_len - 1) / 2 * 8; //TODO: use table.
     switch (key_length)
     {
     case 256:
@@ -1922,8 +1922,24 @@ cleanup:
     return result;
 }
 
+static void
+_libssh_wincng_reverse_bytes(
+    IN PUCHAR buffer,
+    IN size_t buffer_len)
+{
+    PUCHAR start = buffer;
+    PUCHAR end = buffer + buffer_len - 1;
+    while (start < end) {
+        unsigned char tmp = *end;
+        *end = *start;
+        *start = tmp;
+        start++;
+        end--;
+    }
+}
+
 void
-_libssh2_wincng_ecdsa_free(IN _libssh2_wincng_ecdsa_ctx* ctx)
+_libssh2_wincng_ecdsa_free(IN _libssh2_wincng_ecdsa_ctx* ctx) // TODO: ctx is _libssh2_ec_key (ECDH key!)
 {
     if (!ctx) {
         return;
@@ -1987,6 +2003,8 @@ _libssh2_wincng_ecdh_create_key(
         goto cleanup;
     }
 
+    printf("ECDH key: %p\n", key);
+
     status = BCryptFinalizeKeyPair(key, 0);
     if (!BCRYPT_SUCCESS(status)) {
         result = _libssh2_error(
@@ -2022,7 +2040,7 @@ cleanup:
 /*
  * _libssh2_ecdsa_curve_name_with_octal_new
  *
- * Creates an ECDH public key from an uncompressed point.
+ * Creates an ECDSA public key from an uncompressed point.
  */
 
 int
@@ -2048,6 +2066,8 @@ _libssh2_wincng_ecdsa_curve_name_with_octal_new(
         publickey_encoded_len,
         NULL,
         &key);
+
+    printf("ECDSA decoded key: %p\n", key);
 
     if (result != LIBSSH2_ERROR_NONE) {
         goto cleanup;
@@ -2077,10 +2097,10 @@ cleanup:
 
 int
 _libssh2_wincng_ecdh_gen_k(
-    _libssh2_bn** secret,
-    _libssh2_ec_key* privatekey,
-    const unsigned char* server_publickey_encoded,
-    size_t server_publickey_encoded_len)
+    OUT _libssh2_bn** secret,
+    IN _libssh2_ec_key* privatekey,
+    IN const unsigned char* server_publickey_encoded,
+    IN size_t server_publickey_encoded_len)
 {
     int result = LIBSSH2_ERROR_NONE;
     NTSTATUS status;
@@ -2134,7 +2154,7 @@ _libssh2_wincng_ecdh_gen_k(
         goto cleanup;
     }
 
-    if (_libssh2_wincng_bignum_resize(secret, secret_len)) {
+    if (_libssh2_wincng_bignum_resize(*secret, secret_len)) {
         result = LIBSSH2_ERROR_ALLOC;
         goto cleanup;
     }
@@ -2152,6 +2172,13 @@ _libssh2_wincng_ecdh_gen_k(
         result = LIBSSH2_ERROR_PUBLICKEY_PROTOCOL;
         goto cleanup;
     }
+
+    printf("Shared secret key: %p\n", agreed_secret);
+
+    /* BCRYPT_KDF_RAW_SECRET returns the little-endian representation of the raw
+     * secret, so we need to swap it to big endian order. */
+
+    _libssh_wincng_reverse_bytes((*secret)->bignum, secret_len);
 
     result = LIBSSH2_ERROR_NONE;
 
@@ -2711,7 +2738,7 @@ _libssh2_wincng_cipher_init(_libssh2_cipher_ctx *ctx,
 
 
     keylen = (ULONG)sizeof(BCRYPT_KEY_DATA_BLOB_HEADER) +
-            type.dwKeyLength;
+             type.dwKeyLength;
     header = (BCRYPT_KEY_DATA_BLOB_HEADER *)malloc(keylen);
     if(!header) {
         free(pbKeyObject);
