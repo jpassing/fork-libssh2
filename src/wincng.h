@@ -329,12 +329,10 @@ typedef enum {
 typedef struct __libssh2_wincng_ecdsa_ctx {
     BCRYPT_KEY_HANDLE hKey;
     libssh2_curve_type curve;
-} _libssh2_wincng_ecdsa_ctx;
+} _libssh2_wincng_ecdsa_key;
 
-#define libssh2_ecdsa_ctx _libssh2_wincng_ecdsa_ctx
-
-/* Reinterpret _libssh2_ec_key* as BCRYPT_KEY_HANDLE */
-#define _libssh2_ec_key void 
+#define libssh2_ecdsa_ctx _libssh2_wincng_ecdsa_key
+#define _libssh2_ec_key _libssh2_wincng_ecdsa_key 
 
 #define _libssh2_ecdsa_create_key(session, privkey, pubkey_octal, \
                                   pubkey_octal_len, curve) \
