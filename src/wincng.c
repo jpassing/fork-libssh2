@@ -1742,7 +1742,7 @@ typedef struct {
     /* Key length, in bits */
     ULONG key_length;
 
-    /** Magic for key import, indexed by wincng_ecc_keytype */
+    /* Magic for key import, indexed by wincng_ecc_keytype */
     ULONG import_magic[2];
 } _libssh2_ecc_algorithm;
 
@@ -2178,6 +2178,7 @@ _libssh2_wincng_ecdh_gen_k(
     /* BCRYPT_KDF_RAW_SECRET returns the little-endian representation of the raw
      * secret, so we need to swap it to big endian order. */
 
+    //TODO: use _libssh2_wincng_bignum_from_bin instead?
     _libssh_wincng_reverse_bytes((*secret)->bignum, secret_len);
 
     result = LIBSSH2_ERROR_NONE;
@@ -2270,13 +2271,16 @@ _libssh2_wincng_ecdsa_verify(
     IN size_t r_len,
     IN const unsigned char* s,
     IN size_t s_len,
-    IN const unsigned char* hash,
-    IN size_t hash_len)
+    IN const unsigned char* m,
+    IN size_t m_len)
 {
     PUCHAR signature_p1363 = NULL;
     size_t signature_p1363_len;
     int result = LIBSSH2_ERROR_NONE;
     NTSTATUS status;
+    ULONG hash_len;
+    PUCHAR hash = NULL;
+    BCRYPT_ALG_HANDLE hash_alg;
 
     /* CNG expects signatures in IEEE P-1363 format. */
     result = _libssh2_wincng_p1363signature_from_point(
@@ -2291,6 +2295,40 @@ _libssh2_wincng_ecdsa_verify(
         goto cleanup;
     }
 
+    /* Create hash over m */
+    switch (_libssh2_wincng_ecdsa_get_curve_type(ctx))  //TODO: use table.
+    {
+    case LIBSSH2_EC_CURVE_NISTP256:
+        hash_len = 256/8;
+        hash_alg = _libssh2_wincng.hAlgHashSHA256;
+        break;
+
+    case LIBSSH2_EC_CURVE_NISTP384:
+        hash_len = 384/8;
+        hash_alg = _libssh2_wincng.hAlgHashSHA384;
+        break;
+
+    case LIBSSH2_EC_CURVE_NISTP521:
+        hash_len = 512/8;
+        hash_alg = _libssh2_wincng.hAlgHashSHA512;
+        break;
+
+    default:
+        return LIBSSH2_ERROR_INVAL;
+    }
+
+    hash = malloc(hash_len);
+    result = _libssh2_wincng_hash(
+        m,
+        m_len,
+        hash_alg,
+        hash,
+        hash_len);
+    if (result != LIBSSH2_ERROR_NONE) {
+        goto cleanup;
+    }
+
+    /* Verify signature over hash */
     status = BCryptVerifySignature(
         ctx->hKey,
         NULL,
@@ -2312,8 +2350,12 @@ _libssh2_wincng_ecdsa_verify(
     result = LIBSSH2_ERROR_NONE;
 
 cleanup:
+    if (hash) {
+        free(hash);
+    }
+
     if (signature_p1363) {
-        free(signature_p1363);
+        free(signature_p1363); //TODO: use safe free
     }
 
     return result;
