@@ -1945,7 +1945,7 @@ _libssh2_wincng_ecdsa_free(IN _libssh2_wincng_ecdsa_key* key)
         return;
     }
 
-    (void)BCryptDestroyKey(key->hKey);
+    (void)BCryptDestroyKey(key->handle);
     free(key);
 }
 
@@ -1969,9 +1969,7 @@ _libssh2_wincng_ecdh_create_key(
     NTSTATUS status;
     ULONG ecc_blob_len;
     PBCRYPT_ECCKEY_BLOB ecc_blob = NULL;
-    PUCHAR point_x;
-    PUCHAR point_y;
-    BCRYPT_KEY_HANDLE key;
+    BCRYPT_KEY_HANDLE key_handle;
 
     /* Validate parameters */
     if (curve >= _countof(_libssh2_ecdsa_algorithms)) {
@@ -1996,7 +1994,7 @@ _libssh2_wincng_ecdh_create_key(
     /* Create an ECDH key pair using the requested curve */
     status = BCryptGenerateKeyPair(
         _libssh2_wincng.hAlgECDH[curve],
-        &key,
+        &key_handle,
         _libssh2_ecdsa_algorithms[curve].key_length,
         0);
     if (!BCRYPT_SUCCESS(status)) {
@@ -2007,9 +2005,9 @@ _libssh2_wincng_ecdh_create_key(
         goto cleanup;
     }
 
-    printf("ECDH key: %p\n", key);
+    printf("ECDH key: %p\n", key_handle);
 
-    status = BCryptFinalizeKeyPair(key, 0);
+    status = BCryptFinalizeKeyPair(key_handle, 0);
     if (!BCRYPT_SUCCESS(status)) {
         result = _libssh2_error(
             session,
@@ -2021,7 +2019,7 @@ _libssh2_wincng_ecdh_create_key(
     result = _libssh2_wincng_uncompressed_point_from_publickey(
         session,
         curve,
-        key,
+        key_handle,
         encoded_publickey,
         encoded_publickey_len);
     if (result != LIBSSH2_ERROR_NONE) {
@@ -2032,11 +2030,11 @@ _libssh2_wincng_ecdh_create_key(
     }
 
     (*privatekey)->curve = curve;
-    (*privatekey)->hKey = key;
+    (*privatekey)->handle = key_handle;
 
 cleanup:
-    if (result != LIBSSH2_ERROR_NONE && key) {
-        BCryptDestroyKey(key);
+    if (result != LIBSSH2_ERROR_NONE && key_handle) {
+        BCryptDestroyKey(key_handle);
     }
 
     if (result != LIBSSH2_ERROR_NONE && *privatekey) {
@@ -2059,7 +2057,7 @@ _libssh2_wincng_ecdsa_curve_name_with_octal_new(
     IN size_t publickey_encoded_len,
     IN libssh2_curve_type curve)
 {
-    BCRYPT_KEY_HANDLE publickey;
+    BCRYPT_KEY_HANDLE publickey_handle;
     int result = LIBSSH2_ERROR_NONE;
 
     /* Validate parameters */
@@ -2074,9 +2072,9 @@ _libssh2_wincng_ecdsa_curve_name_with_octal_new(
         publickey_encoded,
         publickey_encoded_len,
         NULL,
-        &publickey);
+        &publickey_handle);
 
-    printf("ECDSA decoded key: %p\n", publickey);
+    printf("ECDSA decoded key: %p\n", publickey_handle);
 
     if (result != LIBSSH2_ERROR_NONE) {
         goto cleanup;
@@ -2089,7 +2087,7 @@ _libssh2_wincng_ecdsa_curve_name_with_octal_new(
         goto cleanup;
     }
 
-    (*key)->hKey = publickey;
+    (*key)->handle = publickey_handle;
     (*key)->curve = curve;
 
 cleanup:
@@ -2114,9 +2112,9 @@ _libssh2_wincng_ecdh_gen_k(
     int result = LIBSSH2_ERROR_NONE;
     NTSTATUS status;
 
-    BCRYPT_KEY_HANDLE publickey;
+    BCRYPT_KEY_HANDLE publickey_handle;
     libssh2_curve_type curve;
-    BCRYPT_SECRET_HANDLE agreed_secret = NULL;
+    BCRYPT_SECRET_HANDLE agreed_secret_handle = NULL;
     ULONG secret_len;
 
     /* Decode the public key */
@@ -2125,16 +2123,16 @@ _libssh2_wincng_ecdh_gen_k(
         server_publickey_encoded,
         server_publickey_encoded_len,
         &curve,
-        &publickey);
+        &publickey_handle);
     if (result != LIBSSH2_ERROR_NONE) {
         return result;
     }
 
     /* Establish the shared secret between ourselves and the peer */
     status = BCryptSecretAgreement(
-        privatekey->hKey,
-        publickey,
-        &agreed_secret,
+        privatekey->handle,
+        publickey_handle,
+        &agreed_secret_handle,
         0);
     if (!BCRYPT_SUCCESS(status)) {
         result = LIBSSH2_ERROR_PUBLICKEY_PROTOCOL;
@@ -2144,7 +2142,7 @@ _libssh2_wincng_ecdh_gen_k(
     /* Compute the size of the buffer that is needed to hold the derived
      * shared secret. */
     status = BCryptDeriveKey(
-        agreed_secret,
+        agreed_secret_handle,
         BCRYPT_KDF_RAW_SECRET,
         NULL,
         NULL,
@@ -2170,7 +2168,7 @@ _libssh2_wincng_ecdh_gen_k(
 
     /* And populate the secret bignum */
     status = BCryptDeriveKey(
-        agreed_secret,
+        agreed_secret_handle,
         BCRYPT_KDF_RAW_SECRET,
         NULL,
         (*secret)->bignum,
@@ -2182,7 +2180,7 @@ _libssh2_wincng_ecdh_gen_k(
         goto cleanup;
     }
 
-    printf("Shared secret key: %p\n", agreed_secret);
+    printf("Shared secret key: %p\n", agreed_secret_handle);
 
     /* BCRYPT_KDF_RAW_SECRET returns the little-endian representation of the raw
      * secret, so we need to swap it to big endian order. */
@@ -2193,12 +2191,12 @@ _libssh2_wincng_ecdh_gen_k(
     result = LIBSSH2_ERROR_NONE;
 
 cleanup:
-    if (result != LIBSSH2_ERROR_NONE && agreed_secret) {
+    if (result != LIBSSH2_ERROR_NONE && agreed_secret_handle) {
         _libssh2_wincng_bignum_free(*secret);
     }
 
-    if (result != LIBSSH2_ERROR_NONE && agreed_secret) {
-        BCryptDestroySecret(agreed_secret);
+    if (result != LIBSSH2_ERROR_NONE && agreed_secret_handle) {
+        BCryptDestroySecret(agreed_secret_handle);
     }
 
     return result;
@@ -2339,7 +2337,7 @@ _libssh2_wincng_ecdsa_verify(
 
     /* Verify signature over hash */
     status = BCryptVerifySignature(
-        key->hKey,
+        key->handle,
         NULL,
         hash,
         hash_len,
