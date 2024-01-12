@@ -74,7 +74,8 @@
 #define PEM_RSA_FOOTER "-----END RSA PRIVATE KEY-----"
 #define PEM_DSA_HEADER "-----BEGIN DSA PRIVATE KEY-----"
 #define PEM_DSA_FOOTER "-----END DSA PRIVATE KEY-----"
-
+#define PEM_ECDSA_HEADER "-----BEGIN OPENSSH PRIVATE KEY-----"
+#define PEM_ECDSA_FOOTER "-----END OPENSSH PRIVATE KEY-----"
 
 /* Define these manually to avoid including <ntstatus.h> and thus
    clashing with <windows.h> symbols. */
@@ -1830,7 +1831,7 @@ _libssh2_wincng_publickey_from_uncompressed_point(
     if (key_curve) {
         *key_curve = curve;
     }
-
+    //TODO: free ecc_blob!
     return LIBSSH2_ERROR_NONE;
 }
 
@@ -2380,17 +2381,139 @@ _libssh2_wincng_ecdsa_new_private(
     OUT _libssh2_wincng_ecdsa_key** key,
     IN LIBSSH2_SESSION* session,
     IN const char* filename,
-    IN const unsigned char* pwd)
+    IN const unsigned char* passphrase)
 {
-    UNREFERENCED_PARAMETER(key);
-    UNREFERENCED_PARAMETER(session);
-    UNREFERENCED_PARAMETER(filename);
-    UNREFERENCED_PARAMETER(pwd);
+    FILE* file_handle = NULL;
+    int result;
+    unsigned char* data = NULL;
+    size_t datalen = 0;
 
-    return _libssh2_error(
+    /* Validate parameters */
+    if (!key || !session || !filename) {
+        return LIBSSH2_ERROR_INVAL;
+    }
+
+    if (passphrase != NULL && strlen(passphrase) > 0) {
+        return _libssh2_error(
+            session,
+            LIBSSH2_ERROR_INVAL,
+            "Passphrase-protected ECDSA private key files are unsupported");
+
+        return LIBSSH2_ERROR_INVAL;
+    }
+
+    file_handle = fopen(filename, FOPEN_READTEXT);
+    if (!file_handle) {
+        return _libssh2_error(
+            session,
+            LIBSSH2_ERROR_INVAL,
+            "Opening the private key file failed");
+    }
+
+    result = _libssh2_pem_parse(session,
+        PEM_ECDSA_HEADER,
+        PEM_ECDSA_FOOTER, 
+        passphrase,
+        file_handle,
+        &data,
+        &datalen);
+
+    result = _libssh2_wincng_ecdsa_new_private_frommemory(
+        key,
         session,
-        LIBSSH2_ERROR_ALGO_UNSUPPORTED,
-        "Not implemented, use libssh2_userauth_publickey instead");
+        data,
+        datalen,
+        passphrase);
+
+cleanup:
+    if (file_handle) {
+        fclose(file_handle);
+    }
+
+    if (data) {
+        LIBSSH2_FREE(session, data);
+    }
+
+    return result;
+}
+
+#define AUTH_MAGIC "openssh-key-v1"
+
+int
+_libssh2_wincng_parse_ecdsa_privatekey(
+    IN unsigned char* privatekey,
+    IN size_t privatekey_len)
+{
+    unsigned char* keytype;
+    size_t keytype_len;
+    unsigned char* ignore;
+    size_t ignore_len;
+    unsigned char* publickey;
+    size_t publickey_len;
+    libssh2_curve_type curve_type;
+    int result;
+    int check1, check2;
+    struct string_buf data_buffer;
+    unsigned char d;
+    size_t d_len;
+
+    data_buffer.data = privatekey;
+    data_buffer.dataptr = privatekey;
+    data_buffer.len = privatekey_len;
+
+    /* Read the 2 checkints and check that they match */
+    result = _libssh2_get_u32(&data_buffer, &check1);
+    if (result != LIBSSH2_ERROR_NONE) {
+        goto cleanup;
+    }
+
+    result = _libssh2_get_u32(&data_buffer, &check2);
+    if (result != LIBSSH2_ERROR_NONE) {
+        goto cleanup;
+    }
+
+    if (check1 != check2) {
+        result = LIBSSH2_ERROR_FILE;
+        goto cleanup;
+    }
+
+    /* What follows is a key as defined in draft-miller-ssh-agent, section-3.2.2 */
+
+    /* Read the key type */
+    result = _libssh2_get_string(&data_buffer, &keytype, &keytype_len);
+    if (result != LIBSSH2_ERROR_NONE) {
+        goto cleanup;
+    }
+
+    result = _libssh2_wincng_ecdsa_curve_type_from_name(keytype, &curve_type);
+    if (result < 0) {
+        goto cleanup;
+    }
+
+    /* Read the curve */
+    result = _libssh2_get_string(&data_buffer, &ignore, &ignore_len);
+    if (result != LIBSSH2_ERROR_NONE) {
+        goto cleanup;
+    }
+
+    /* Read Q */
+    result = _libssh2_get_string(&data_buffer, &publickey, &publickey_len);
+    if (result != LIBSSH2_ERROR_NONE) {
+        goto cleanup;
+    }
+
+    /* Read d */
+    result = _libssh2_get_bignum_bytes(&data_buffer, &d, &d_len);
+    if (result != LIBSSH2_ERROR_NONE) {
+        goto cleanup;
+    }
+
+    /* Ignore the rest (comment, etc) */
+
+
+
+cleanup:
+    return result;
 }
 
 /*
@@ -2399,25 +2522,106 @@ _libssh2_wincng_ecdsa_new_private(
  * Creates a new private key given a file data and password
  *
  */
-
 int
 _libssh2_wincng_ecdsa_new_private_frommemory(
     OUT _libssh2_wincng_ecdsa_key** key,
     IN LIBSSH2_SESSION* session,
     IN const char* data,
     IN size_t data_len,
-    IN const unsigned char* pwd)
+    IN const unsigned char* passphrase)
 {
-    UNREFERENCED_PARAMETER(key);
-    UNREFERENCED_PARAMETER(session);
-    UNREFERENCED_PARAMETER(data);
-    UNREFERENCED_PARAMETER(data_len);
-    UNREFERENCED_PARAMETER(pwd);
+    int result;
+    struct string_buf data_buffer;
+    int key_count;
+    unsigned char* privatekey;
+    size_t privatekey_len;
 
-    return _libssh2_error(
-        session,
-        LIBSSH2_ERROR_ALGO_UNSUPPORTED,
-        "Not implemented, use libssh2_userauth_publickey instead");
+    /* Validate parameters */
+    if (!key || !session || !data) {
+        return LIBSSH2_ERROR_INVAL;
+    }
+
+    if (passphrase != NULL && strlen(passphrase) > 0) {
+        return _libssh2_error(
+            session,
+            LIBSSH2_ERROR_INVAL,
+            "Passphrase-protected ECDSA private key files are unsupported");
+
+        return LIBSSH2_ERROR_INVAL;
+    }
+
+
+    /* ECDSA private key files use the decoding defined in PROTOCOL.key */
+
+    /* Read AUTH_MAGIC */
+    if (strncmp(data, AUTH_MAGIC, data_len) != 0) {
+        result = -1;
+        goto cleanup;
+    }
+
+    data_buffer.data = data;
+    data_buffer.dataptr = data + strlen(AUTH_MAGIC) + 1;
+    data_buffer.len = data_len;
+
+    /* Read ciphername, should be 'none' because we don't support passphrases */
+    result = _libssh2_match_string(&data_buffer, "none");
+    if (result != LIBSSH2_ERROR_NONE) {
+        goto cleanup;
+    }
+
+    /* Read kdfname, should be 'none' because we don't support passphrases */
+    result = _libssh2_match_string(&data_buffer, "none");
+    if (result != LIBSSH2_ERROR_NONE) {
+        goto cleanup;
+    }
+
+    /* Read kdfoptions */
+    result = _libssh2_match_string(&data_buffer, "");
+    if (result != LIBSSH2_ERROR_NONE) {
+        goto cleanup;
+    }
+
+    /* Read number of keys N */
+    result = _libssh2_get_u32(&data_buffer, &key_count);
+    if (result != LIBSSH2_ERROR_NONE) {
+        goto cleanup;
+    }
+
+    if (key_count == 0) {
+        result = LIBSSH2_ERROR_FILE;
+        goto cleanup;
+    }
+
+    /* Skip all public keys */
+    for (int i = 0; i < key_count; i++) {
+        unsigned char* publickey;
+        size_t publickey_len;
+
+        result = _libssh2_get_string(&data_buffer, &publickey, &publickey_len);
+        if (result != LIBSSH2_ERROR_NONE) {
+            goto cleanup;
+        }
+    }
+
+    /* Read first private key */
+    result = _libssh2_get_string(&data_buffer, &privatekey, &privatekey_len);
+    if (result != LIBSSH2_ERROR_NONE) {
+        goto cleanup;
+    }
+
+    result = _libssh2_wincng_parse_ecdsa_privatekey(privatekey, privatekey_len);
+
+cleanup:
+    if (result != LIBSSH2_ERROR_NONE)
+    {
+        return _libssh2_error(
+            session,
+            result,
+            "Malformed key");
+    }
+    else {
+        return result;
+    }
 }
 
 /*
