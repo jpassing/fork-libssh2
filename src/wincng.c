@@ -1823,15 +1823,14 @@ _libssh2_wincng_ecdsa_decode_uncompressed_point(
     return LIBSSH2_ERROR_NONE;
 }
 
-
 /*
- * Create a CNG key from an ECC point.
+ * Create a CNG public key from an ECC point.
  */
 static int
 _libssh2_wincng_publickey_from_point(
     IN wincng_ecc_keytype keytype,
     IN _libssh2_ecdsa_point* point,
-    OUT OPTIONAL libssh2_curve_type* key_curve,
+    OUT OPTIONAL libssh2_curve_type* key_curve, //TODO: remove
     OUT BCRYPT_KEY_HANDLE *key) {
 
     int result = LIBSSH2_ERROR_NONE;
@@ -1839,7 +1838,6 @@ _libssh2_wincng_publickey_from_point(
 
     PBCRYPT_ECCKEY_BLOB ecc_blob;
     size_t ecc_blob_len;
-
 
     *key = NULL;
 
@@ -1882,6 +1880,73 @@ _libssh2_wincng_publickey_from_point(
         *key_curve = point->curve;
     }
     
+    result = LIBSSH2_ERROR_NONE;
+
+cleanup:
+    free(ecc_blob);
+    return result;
+}
+
+/*
+ * Create a CNG private key from an ECC point.
+ */
+static int
+_libssh2_wincng_privatekey_from_point(
+    IN wincng_ecc_keytype keytype,
+    IN _libssh2_ecdsa_point* q,
+    IN unsigned char* d,
+    IN size_t d_len,
+    OUT BCRYPT_KEY_HANDLE* key) {
+
+    int result = LIBSSH2_ERROR_NONE;
+    NTSTATUS status;
+
+    PBCRYPT_ECCKEY_BLOB ecc_blob;
+    size_t ecc_blob_len;
+
+    *key = NULL;
+
+    /* Initialize a blob to import */
+    ecc_blob_len = sizeof(BCRYPT_ECCPRIVATE_BLOB) + q->x_len + q->y_len + d_len;
+    ecc_blob = malloc(ecc_blob_len);
+    if (!ecc_blob) {
+        return LIBSSH2_ERROR_ALLOC;
+    }
+
+    ecc_blob->dwMagic = _libssh2_ecdsa_algorithms[q->curve].private_import_magic[keytype];
+    ecc_blob->cbKey = _libssh2_ecdsa_algorithms[q->curve].key_length / 8;
+
+    /* Copy x, y */
+    memcpy(
+        (PUCHAR)ecc_blob + sizeof(BCRYPT_ECCKEY_BLOB),
+        q->x,
+        q->x_len);
+    memcpy(
+        (PUCHAR)ecc_blob + sizeof(BCRYPT_ECCKEY_BLOB) + q->x_len,
+        q->y,
+        q->y_len);
+
+    /* Copy d */
+    memcpy(
+        (PUCHAR)ecc_blob + sizeof(BCRYPT_ECCKEY_BLOB) + q->x_len + q->y_len,
+        d,
+        d_len);
+
+    status = BCryptImportKeyPair(
+        keytype == WINCNG_KEYTYPE_ECDSA
+        ? _libssh2_wincng.hAlgECDSA[q->curve]
+        : _libssh2_wincng.hAlgECDH[q->curve],
+        NULL,
+        BCRYPT_ECCPRIVATE_BLOB,
+        key,
+        (PUCHAR)ecc_blob,
+        (ULONG)ecc_blob_len,
+        0);
+    if (!BCRYPT_SUCCESS(status)) {
+        result = LIBSSH2_ERROR_PUBLICKEY_PROTOCOL;
+        goto cleanup;
+    }
+
     result = LIBSSH2_ERROR_NONE;
 
 cleanup:
@@ -2516,15 +2581,19 @@ cleanup:
 
 int
 _libssh2_wincng_parse_ecdsa_privatekey(
+    OUT _libssh2_wincng_ecdsa_key** key,
     IN unsigned char* privatekey,
     IN size_t privatekey_len)
 {
     unsigned char* keytype;
     size_t keytype_len;
+
     unsigned char* ignore;
     size_t ignore_len;
+
     unsigned char* publickey;
     size_t publickey_len;
+
     libssh2_curve_type curve_type;
     int result;
     int check1, check2;
@@ -2533,6 +2602,10 @@ _libssh2_wincng_parse_ecdsa_privatekey(
     _libssh2_ecdsa_point q;
     unsigned char* d;
     size_t d_len;
+
+    BCRYPT_KEY_HANDLE key_handle = NULL;
+
+    *key = NULL;
 
     data_buffer.data = privatekey;
     data_buffer.dataptr = privatekey;
@@ -2595,12 +2668,32 @@ _libssh2_wincng_parse_ecdsa_privatekey(
 
     /* Ignore the rest (comment, etc) */
 
+    result = _libssh2_wincng_privatekey_from_point(
+        WINCNG_KEYTYPE_ECDSA,
+        &q,
+        d,
+        d_len,
+        &key_handle);
+    if (result != LIBSSH2_ERROR_NONE) {
+        goto cleanup;
+    }
 
-    //TODO: parse Q, d into _BCRYPT_ECCKEY_BLOB and import it
+    *key = malloc(sizeof(_libssh2_wincng_ecdsa_key));
+    if (!*key) {
+        result = LIBSSH2_ERROR_ALLOC;
+        goto cleanup;
+    }
 
-    result = LIBSSH2_ERROR_INVAL;
+    (*key)->curve = q.curve;
+    (*key)->handle = key_handle;
+
+    result = LIBSSH2_ERROR_NONE;
 
 cleanup:
+    if (result != LIBSSH2_ERROR_NONE && key_handle) {
+        (void)BCryptDestroyKey(key_handle);
+    }
+    
     return result;
 }
 
@@ -2697,7 +2790,10 @@ _libssh2_wincng_ecdsa_new_private_frommemory(
         goto cleanup;
     }
 
-    result = _libssh2_wincng_parse_ecdsa_privatekey(privatekey, privatekey_len);
+    result = _libssh2_wincng_parse_ecdsa_privatekey(
+        key,
+        privatekey,
+        privatekey_len);
 
 cleanup:
     if (result != LIBSSH2_ERROR_NONE)
