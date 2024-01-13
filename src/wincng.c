@@ -2387,10 +2387,7 @@ static int _libssh2_wincng_p1363signature_from_point(
 /*
  * _libssh2_ecdsa_curve_type_from_name
  *
- * returns 0 for success, key curve type that maps to libssh2_curve_type
- *
  */
-
 int
 _libssh2_wincng_ecdsa_curve_type_from_name(
     IN const char* name,
@@ -2676,6 +2673,7 @@ _libssh2_wincng_parse_ecdsa_privatekey(
 
     /* Ignore the rest (comment, etc) */
 
+    /* Use Q and d to create a key handle */
     result = _libssh2_wincng_privatekey_from_point(
         WINCNG_KEYTYPE_ECDSA,
         &q,
