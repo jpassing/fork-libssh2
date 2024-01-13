@@ -1780,10 +1780,10 @@ typedef struct __libssh2_ecdsa_point {
 int
 _libssh2_wincng_ecdsa_decode_uncompressed_point(
     IN const unsigned char* encoded_point,
-    IN ULONG encoded_point_len,
+    IN size_t encoded_point_len,
     OUT _libssh2_ecdsa_point* point)
 {
-    ULONG key_length;
+    size_t key_length;
 
     if (!point) {
         return LIBSSH2_ERROR_INVAL;
@@ -1830,7 +1830,6 @@ static int
 _libssh2_wincng_publickey_from_point(
     IN wincng_ecc_keytype keytype,
     IN _libssh2_ecdsa_point* point,
-    OUT OPTIONAL libssh2_curve_type* key_curve, //TODO: remove
     OUT BCRYPT_KEY_HANDLE *key) {
 
     int result = LIBSSH2_ERROR_NONE;
@@ -1874,10 +1873,6 @@ _libssh2_wincng_publickey_from_point(
     if (!BCRYPT_SUCCESS(status)) {
         result = LIBSSH2_ERROR_PUBLICKEY_PROTOCOL;
         goto cleanup;
-    }
-
-    if (key_curve) {
-        *key_curve = point->curve;
     }
     
     result = LIBSSH2_ERROR_NONE;
@@ -2195,7 +2190,6 @@ _libssh2_wincng_ecdsa_curve_name_with_octal_new(
     result = _libssh2_wincng_publickey_from_point(
         WINCNG_KEYTYPE_ECDSA,
         &publickey,
-        NULL,
         &publickey_handle);
 
     if (result != LIBSSH2_ERROR_NONE) {
@@ -2235,7 +2229,6 @@ _libssh2_wincng_ecdh_gen_k(
     NTSTATUS status;
 
     BCRYPT_KEY_HANDLE publickey_handle;
-    libssh2_curve_type curve;
     BCRYPT_SECRET_HANDLE agreed_secret_handle = NULL;
     ULONG secret_len;
     _libssh2_ecdsa_point server_publickey;
@@ -2252,7 +2245,6 @@ _libssh2_wincng_ecdh_gen_k(
     result = _libssh2_wincng_publickey_from_point(
         WINCNG_KEYTYPE_ECDH,
         &server_publickey,
-        &curve,
         &publickey_handle);
     if (result != LIBSSH2_ERROR_NONE) {
         return result;
@@ -2393,6 +2385,28 @@ static int _libssh2_wincng_p1363signature_from_point(
 }
 
 /*
+ * _libssh2_ecdsa_curve_type_from_name
+ *
+ * returns 0 for success, key curve type that maps to libssh2_curve_type
+ *
+ */
+
+int
+_libssh2_wincng_ecdsa_curve_type_from_name(
+    IN const char* name,
+    OUT libssh2_curve_type* curve)
+{
+    for (int i = 0; i < _countof(_libssh2_ecdsa_algorithms); i++) {
+        if (strcmp(name, _libssh2_ecdsa_algorithms[i].name) == 0) {
+            *curve = _libssh2_ecdsa_algorithms[i].curve;
+            return LIBSSH2_ERROR_NONE;
+        }
+    }
+
+    return -1;
+}
+
+/*
  * _libssh2_ecdsa_verify
  *
  * Verifies the ECDSA signature of a hashed message
@@ -2455,7 +2469,7 @@ _libssh2_wincng_ecdsa_verify(
     hash = malloc(hash_len);
     result = _libssh2_wincng_hash(
         m,
-        m_len,
+        (ULONG)m_len,
         hash_alg,
         hash,
         hash_len);
@@ -2470,7 +2484,7 @@ _libssh2_wincng_ecdsa_verify(
         hash,
         hash_len,
         signature_p1363,
-        signature_p1363_len,
+        (ULONG)signature_p1363_len,
         0);
 
     if (status == STATUS_INVALID_SIGNATURE) {
@@ -2707,7 +2721,7 @@ _libssh2_wincng_ecdsa_new_private_frommemory(
 {
     int result;
     struct string_buf data_buffer;
-    int key_count;
+    uint32_t key_count;
     unsigned char* privatekey;
     size_t privatekey_len;
 
@@ -2884,26 +2898,6 @@ _libssh2_wincng_ecdsa_get_curve_type(_libssh2_wincng_ecdsa_key* key)
 }
 
 
-/*
- * _libssh2_ecdsa_curve_type_from_name
- *
- * returns 0 for success, key curve type that maps to libssh2_curve_type
- *
- */
-
-int
-_libssh2_wincng_ecdsa_curve_type_from_name(
-    IN const char* name,
-    OUT libssh2_curve_type* out_type)
-{
-    for (int i = 0; i < _countof(_libssh2_ecdsa_algorithms); i++) {
-        if (strcmp(name, _libssh2_ecdsa_algorithms[i].name) == 0) {
-            return _libssh2_ecdsa_algorithms[i].curve;
-        }
-    }
-
-    return -1;
-}
 
 #endif
 
