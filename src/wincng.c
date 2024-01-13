@@ -1962,7 +1962,7 @@ _libssh2_wincng_uncompressed_point_from_publickey(
     IN LIBSSH2_SESSION* session,
     IN libssh2_curve_type curve,
     IN BCRYPT_KEY_HANDLE key,
-    OUT PUCHAR *encoded_point,
+    OUT PUCHAR *encoded_point, //TODO: use struct
     OUT size_t * encoded_point_len) {
 
     int result = LIBSSH2_ERROR_NONE;
@@ -2123,8 +2123,6 @@ _libssh2_wincng_ecdh_create_key(
         goto cleanup;
     }
 
-    printf("ECDH key: %p\n", key_handle);
-
     status = BCryptFinalizeKeyPair(key_handle, 0);
     if (!BCRYPT_SUCCESS(status)) {
         result = _libssh2_error(
@@ -2199,8 +2197,6 @@ _libssh2_wincng_ecdsa_curve_name_with_octal_new(
         &publickey,
         NULL,
         &publickey_handle);
-
-    printf("ECDSA decoded key: %p\n", publickey_handle);
 
     if (result != LIBSSH2_ERROR_NONE) {
         goto cleanup;
@@ -2313,8 +2309,6 @@ _libssh2_wincng_ecdh_gen_k(
         result = LIBSSH2_ERROR_PUBLICKEY_PROTOCOL;
         goto cleanup;
     }
-
-    printf("Shared secret key: %p\n", agreed_secret_handle);
 
     /* BCRYPT_KDF_RAW_SECRET returns the little-endian representation of the raw
      * secret, so we need to swap it to big endian order. */
@@ -2821,20 +2815,59 @@ _libssh2_wincng_ecdsa_sign(
     IN _libssh2_wincng_ecdsa_key* key,
     IN const unsigned char* hash,
     IN size_t hash_len,
-    OUT unsigned char** sign,
-    OUT size_t* sign_len)
+    OUT unsigned char** signature,
+    OUT size_t* signature_len)
 {
-    UNREFERENCED_PARAMETER(session);
-    UNREFERENCED_PARAMETER(key);
-    UNREFERENCED_PARAMETER(hash);
-    UNREFERENCED_PARAMETER(hash_len);
-    UNREFERENCED_PARAMETER(sign);
-    UNREFERENCED_PARAMETER(sign_len);
+    unsigned char* data, * sig;
+    ULONG cbData, datalen, siglen;
+    int ret;
 
-    return _libssh2_error(
-        session,
-        LIBSSH2_ERROR_ALGO_UNSUPPORTED,
-        "Not implemented, use libssh2_userauth_publickey instead");
+    datalen = (ULONG)hash_len; // TODO: redundant?
+    data = malloc(datalen);
+    if (!data) {
+        return -1;
+    }
+    memcpy(data, hash, datalen);
+
+    ret = BCryptSignHash(
+        key->handle,
+        NULL,
+        data,
+        datalen,
+        NULL,
+        0,
+        &cbData,
+        0);
+    if (BCRYPT_SUCCESS(ret)) {
+        siglen = cbData;
+        sig = LIBSSH2_ALLOC(session, siglen);
+        if (sig) {
+            ret = BCryptSignHash(
+                key->handle,
+                NULL,
+                data,
+                datalen,
+                sig,
+                siglen,
+                &cbData,
+                0);
+            if (BCRYPT_SUCCESS(ret)) {
+                *signature_len = siglen;
+                *signature = sig;
+
+                //TODO: convert signature format
+            }
+            else {
+                LIBSSH2_FREE(session, sig);
+            }
+        }
+        else
+            ret = STATUS_NO_MEMORY;
+    }
+
+    _libssh2_wincng_safe_free(data, datalen);
+
+    return BCRYPT_SUCCESS(ret) ? 0 : -1;
 }
 
 /*
