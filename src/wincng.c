@@ -2529,7 +2529,9 @@ _libssh2_wincng_parse_ecdsa_privatekey(
     int result;
     int check1, check2;
     struct string_buf data_buffer;
-    unsigned char d;
+
+    _libssh2_ecdsa_point q;
+    unsigned char* d;
     size_t d_len;
 
     data_buffer.data = privatekey;
@@ -2577,15 +2579,25 @@ _libssh2_wincng_parse_ecdsa_privatekey(
         goto cleanup;
     }
 
+    result = _libssh2_wincng_ecdsa_decode_uncompressed_point(
+        publickey,
+        publickey_len,
+        &q);
+    if (result != LIBSSH2_ERROR_NONE) {
+        goto cleanup;
+    }
+
     /* Read d */
-    //result = _libssh2_get_bignum_bytes(&data_buffer, &d, &d_len);
+    result = _libssh2_get_bignum_bytes(&data_buffer, &d, &d_len);
     if (result != LIBSSH2_ERROR_NONE) {
         goto cleanup;
     }
 
     /* Ignore the rest (comment, etc) */
 
+
     //TODO: parse Q, d into _BCRYPT_ECCKEY_BLOB and import it
+
     result = LIBSSH2_ERROR_INVAL;
 
 cleanup:
