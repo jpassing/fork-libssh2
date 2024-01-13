@@ -1775,13 +1775,13 @@ typedef struct __libssh2_ecdsa_point {
 
     const unsigned char* y;
     size_t y_len;
-} _libssh2_ecdsa_uncompressed_point;
+} _libssh2_ecdsa_point;
 
 int
 _libssh2_wincng_ecdsa_decode_uncompressed_point(
     IN const unsigned char* encoded_point,
     IN ULONG encoded_point_len,
-    OUT _libssh2_ecdsa_uncompressed_point* point)
+    OUT _libssh2_ecdsa_point* point)
 {
     ULONG key_length;
 
@@ -1825,12 +1825,12 @@ _libssh2_wincng_ecdsa_decode_uncompressed_point(
 
 
 /*
- * Create a CNG key from an uncompressed encoded point.
+ * Create a CNG key from an ECC point.
  */
 static int
-_libssh2_wincng_publickey_from_uncompressed_point(
+_libssh2_wincng_publickey_from_point(
     IN wincng_ecc_keytype keytype,
-    IN _libssh2_ecdsa_uncompressed_point* point,
+    IN _libssh2_ecdsa_point* point,
     OUT OPTIONAL libssh2_curve_type* key_curve,
     OUT BCRYPT_KEY_HANDLE *key) {
 
@@ -2112,7 +2112,7 @@ _libssh2_wincng_ecdsa_curve_name_with_octal_new(
 {
     BCRYPT_KEY_HANDLE publickey_handle;
     int result = LIBSSH2_ERROR_NONE;
-    _libssh2_ecdsa_uncompressed_point publickey;
+    _libssh2_ecdsa_point publickey;
 
     /* Validate parameters */
     if (curve >= _countof(_libssh2_ecdsa_algorithms)) {
@@ -2129,7 +2129,7 @@ _libssh2_wincng_ecdsa_curve_name_with_octal_new(
         goto cleanup;
     }
 
-    result = _libssh2_wincng_publickey_from_uncompressed_point(
+    result = _libssh2_wincng_publickey_from_point(
         WINCNG_KEYTYPE_ECDSA,
         &publickey,
         NULL,
@@ -2177,7 +2177,7 @@ _libssh2_wincng_ecdh_gen_k(
     libssh2_curve_type curve;
     BCRYPT_SECRET_HANDLE agreed_secret_handle = NULL;
     ULONG secret_len;
-    _libssh2_ecdsa_uncompressed_point server_publickey;
+    _libssh2_ecdsa_point server_publickey;
 
     /* Decode the public key */
     result = _libssh2_wincng_ecdsa_decode_uncompressed_point(
@@ -2188,7 +2188,7 @@ _libssh2_wincng_ecdh_gen_k(
         return result;
     }
 
-    result = _libssh2_wincng_publickey_from_uncompressed_point(
+    result = _libssh2_wincng_publickey_from_point(
         WINCNG_KEYTYPE_ECDH,
         &server_publickey,
         &curve,
