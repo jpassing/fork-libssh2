@@ -1743,16 +1743,29 @@ typedef struct {
     /* Key length, in bits */
     ULONG key_length;
 
-    /* Magic for key import, indexed by wincng_ecc_keytype */
-    ULONG import_magic[2];
+    /* Magic for public key import, indexed by wincng_ecc_keytype */
+    ULONG public_import_magic[2];
+
+    /* Magic for private key import, indexed by wincng_ecc_keytype */
+    ULONG private_import_magic[2];
 } _libssh2_ecc_algorithm;
 
 /* Supported algorithms, indexed by libssh2_curve_type */
 static _libssh2_ecc_algorithm _libssh2_ecdsa_algorithms[] = {
-    { "ecdsa-sha2-nistp256", LIBSSH2_EC_CURVE_NISTP256, 256, { BCRYPT_ECDSA_PUBLIC_P256_MAGIC, BCRYPT_ECDH_PUBLIC_P256_MAGIC }},
-    { "ecdsa-sha2-nistp384", LIBSSH2_EC_CURVE_NISTP384, 384, { BCRYPT_ECDSA_PUBLIC_P384_MAGIC, BCRYPT_ECDH_PUBLIC_P384_MAGIC }},
-    { "ecdsa-sha2-nistp521", LIBSSH2_EC_CURVE_NISTP521, 521, { BCRYPT_ECDSA_PUBLIC_P521_MAGIC, BCRYPT_ECDH_PUBLIC_P521_MAGIC }},
+    { "ecdsa-sha2-nistp256",
+      LIBSSH2_EC_CURVE_NISTP256, 256,
+      { BCRYPT_ECDSA_PUBLIC_P256_MAGIC, BCRYPT_ECDH_PUBLIC_P256_MAGIC },
+      { BCRYPT_ECDSA_PRIVATE_P256_MAGIC, BCRYPT_ECDH_PRIVATE_P256_MAGIC }},
+    { "ecdsa-sha2-nistp384",
+      LIBSSH2_EC_CURVE_NISTP384, 384,
+      { BCRYPT_ECDSA_PUBLIC_P384_MAGIC, BCRYPT_ECDH_PUBLIC_P384_MAGIC },
+      { BCRYPT_ECDSA_PRIVATE_P384_MAGIC, BCRYPT_ECDH_PRIVATE_P384_MAGIC }},
+    { "ecdsa-sha2-nistp521",
+      LIBSSH2_EC_CURVE_NISTP521, 521,
+      { BCRYPT_ECDSA_PUBLIC_P521_MAGIC, BCRYPT_ECDH_PUBLIC_P521_MAGIC },
+      { BCRYPT_ECDSA_PRIVATE_P521_MAGIC, BCRYPT_ECDH_PRIVATE_P521_MAGIC }},
 };
+
 
 /*
  * Create a CNG key from an uncompressed encoded point.
@@ -1808,7 +1821,7 @@ _libssh2_wincng_publickey_from_uncompressed_point(
         return LIBSSH2_ERROR_ALLOC;
     }
 
-    ecc_blob->dwMagic = _libssh2_ecdsa_algorithms[curve].import_magic[keytype];
+    ecc_blob->dwMagic = _libssh2_ecdsa_algorithms[curve].public_import_magic[keytype];
     ecc_blob->cbKey = _libssh2_ecdsa_algorithms[curve].key_length / 8;
 
     /** Copy x, y in one go */
@@ -2510,7 +2523,8 @@ _libssh2_wincng_parse_ecdsa_privatekey(
 
     /* Ignore the rest (comment, etc) */
 
-
+    //TODO: parse Q, d into _BCRYPT_ECCKEY_BLOB and import it
+    result = LIBSSH2_ERROR_INVAL;
 
 cleanup:
     return result;
