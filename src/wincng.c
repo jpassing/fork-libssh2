@@ -1766,6 +1766,63 @@ static _libssh2_ecc_algorithm _libssh2_ecdsa_algorithms[] = {
       { BCRYPT_ECDSA_PRIVATE_P521_MAGIC, BCRYPT_ECDH_PRIVATE_P521_MAGIC }},
 };
 
+/* An encoded point */
+typedef struct __libssh2_ecdsa_point {
+    libssh2_curve_type curve;
+
+    const unsigned char* x;
+    size_t x_len;
+
+    const unsigned char* y;
+    size_t y_len;
+} _libssh2_ecdsa_uncompressed_point;
+
+int
+_libssh2_wincng_ecdsa_decode_uncompressed_point(
+    IN const unsigned char* encoded_point,
+    IN ULONG encoded_point_len,
+    OUT _libssh2_ecdsa_uncompressed_point* point)
+{
+    ULONG key_length;
+
+    if (!point) {
+        return LIBSSH2_ERROR_INVAL;
+    }
+
+    /* Verify that the poing uses uncompressed format */
+    if (encoded_point_len == 0 || encoded_point[0] != 4) {
+        return LIBSSH2_ERROR_INVAL;
+    }
+
+    /* Get key length in bits */
+    key_length = (encoded_point_len - 1) / 2 * 8;
+    switch (key_length)
+    {
+    case 256:
+        point->curve = LIBSSH2_EC_CURVE_NISTP256;
+        break;
+
+    case 384:
+        point->curve = LIBSSH2_EC_CURVE_NISTP384;
+        break;
+
+    case 521: // TODO: is this correct? Use (key_length + 7) / 8?
+        point->curve = LIBSSH2_EC_CURVE_NISTP521;
+        break;
+
+    default:
+        return LIBSSH2_ERROR_INVAL;
+    }
+
+    point->x = encoded_point + 1;
+    point->x_len = key_length / 8;
+
+    point->y = point->x + point->x_len;
+    point->y_len = key_length / 8;
+
+    return LIBSSH2_ERROR_NONE;
+}
+
 
 /*
  * Create a CNG key from an uncompressed encoded point.
@@ -1773,79 +1830,63 @@ static _libssh2_ecc_algorithm _libssh2_ecdsa_algorithms[] = {
 static int
 _libssh2_wincng_publickey_from_uncompressed_point(
     IN wincng_ecc_keytype keytype,
-    IN const unsigned char* encoded_point,
-    IN ULONG encoded_point_len,
+    IN _libssh2_ecdsa_uncompressed_point* point,
     OUT OPTIONAL libssh2_curve_type* key_curve,
     OUT BCRYPT_KEY_HANDLE *key) {
 
     int result = LIBSSH2_ERROR_NONE;
     NTSTATUS status;
 
-    ULONG key_length;
-    libssh2_curve_type curve;
-
     PBCRYPT_ECCKEY_BLOB ecc_blob;
-    ULONG ecc_blob_len;
+    size_t ecc_blob_len;
 
-    /* Verify that the poing uses uncompressed format */
-    if (encoded_point[0] != 4) {
-        return LIBSSH2_ERROR_INVAL;
-    }
 
     *key = NULL;
 
-    /* Get key length in bits */
-    key_length = (encoded_point_len - 1) / 2 * 8; //TODO: use table.
-    switch (key_length)
-    {
-    case 256:
-        curve = LIBSSH2_EC_CURVE_NISTP256;
-        break;
-
-    case 384:
-        curve = LIBSSH2_EC_CURVE_NISTP384;
-        break;
-
-    case 521:
-        curve = LIBSSH2_EC_CURVE_NISTP521;
-        break;
-
-    default:
-        return LIBSSH2_ERROR_INVAL;
-    }
-
     /* Initialize a blob to import */
-    ecc_blob_len = sizeof(BCRYPT_ECCKEY_BLOB) + 2 * (key_length + 7) / 8;
+    ecc_blob_len = sizeof(BCRYPT_ECCKEY_BLOB) + point->x_len + point->y_len;
     ecc_blob = malloc(ecc_blob_len);
     if (!ecc_blob) {
         return LIBSSH2_ERROR_ALLOC;
     }
 
-    ecc_blob->dwMagic = _libssh2_ecdsa_algorithms[curve].public_import_magic[keytype];
-    ecc_blob->cbKey = _libssh2_ecdsa_algorithms[curve].key_length / 8;
+    ecc_blob->dwMagic = _libssh2_ecdsa_algorithms[point->curve].public_import_magic[keytype];
+    ecc_blob->cbKey = _libssh2_ecdsa_algorithms[point->curve].key_length / 8;
 
-    /** Copy x, y in one go */
-    memcpy((PUCHAR)ecc_blob + sizeof(BCRYPT_ECCKEY_BLOB), encoded_point + 1, encoded_point_len - 1);
+    /** Copy x, y */
+    memcpy(
+        (PUCHAR)ecc_blob + sizeof(BCRYPT_ECCKEY_BLOB),
+        point->x,
+        point->x_len);
+    memcpy(
+        (PUCHAR)ecc_blob + sizeof(BCRYPT_ECCKEY_BLOB) + point->x_len,
+        point->y,
+        point->y_len);
 
     status = BCryptImportKeyPair(
         keytype == WINCNG_KEYTYPE_ECDSA
-            ? _libssh2_wincng.hAlgECDSA[curve]
-            : _libssh2_wincng.hAlgECDH[curve],
+            ? _libssh2_wincng.hAlgECDSA[point->curve]
+            : _libssh2_wincng.hAlgECDH[point->curve],
         NULL,
         BCRYPT_ECCPUBLIC_BLOB,
         key,
         (PUCHAR)ecc_blob,
-        ecc_blob_len,
+        (ULONG)ecc_blob_len,
         0);
     if (!BCRYPT_SUCCESS(status)) {
-        return LIBSSH2_ERROR_PUBLICKEY_PROTOCOL;
+        result = LIBSSH2_ERROR_PUBLICKEY_PROTOCOL;
+        goto cleanup;
     }
 
     if (key_curve) {
-        *key_curve = curve;
+        *key_curve = point->curve;
     }
-    //TODO: free ecc_blob!
-    return LIBSSH2_ERROR_NONE;
+    
+    result = LIBSSH2_ERROR_NONE;
+
+cleanup:
+    free(ecc_blob);
+    return result;
 }
 
 /*
@@ -1857,7 +1898,7 @@ _libssh2_wincng_uncompressed_point_from_publickey(
     IN libssh2_curve_type curve,
     IN BCRYPT_KEY_HANDLE key,
     OUT PUCHAR *encoded_point,
-    OUT ULONG * encoded_point_len) {
+    OUT size_t * encoded_point_len) {
 
     int result = LIBSSH2_ERROR_NONE;
     NTSTATUS status;
@@ -1981,8 +2022,6 @@ _libssh2_wincng_ecdh_create_key(
 
     int result = LIBSSH2_ERROR_NONE;
     NTSTATUS status;
-    ULONG ecc_blob_len;
-    PBCRYPT_ECCKEY_BLOB ecc_blob = NULL;
     BCRYPT_KEY_HANDLE key_handle;
 
     /* Validate parameters */
@@ -2073,6 +2112,7 @@ _libssh2_wincng_ecdsa_curve_name_with_octal_new(
 {
     BCRYPT_KEY_HANDLE publickey_handle;
     int result = LIBSSH2_ERROR_NONE;
+    _libssh2_ecdsa_uncompressed_point publickey;
 
     /* Validate parameters */
     if (curve >= _countof(_libssh2_ecdsa_algorithms)) {
@@ -2081,10 +2121,17 @@ _libssh2_wincng_ecdsa_curve_name_with_octal_new(
 
     *key = NULL;
 
-    result = _libssh2_wincng_publickey_from_uncompressed_point(
-        WINCNG_KEYTYPE_ECDSA,
+    result = _libssh2_wincng_ecdsa_decode_uncompressed_point(
         publickey_encoded,
         publickey_encoded_len,
+        &publickey);
+    if (result != LIBSSH2_ERROR_NONE) {
+        goto cleanup;
+    }
+
+    result = _libssh2_wincng_publickey_from_uncompressed_point(
+        WINCNG_KEYTYPE_ECDSA,
+        &publickey,
         NULL,
         &publickey_handle);
 
@@ -2130,12 +2177,20 @@ _libssh2_wincng_ecdh_gen_k(
     libssh2_curve_type curve;
     BCRYPT_SECRET_HANDLE agreed_secret_handle = NULL;
     ULONG secret_len;
+    _libssh2_ecdsa_uncompressed_point server_publickey;
 
     /* Decode the public key */
-    result = _libssh2_wincng_publickey_from_uncompressed_point(
-        WINCNG_KEYTYPE_ECDH,
+    result = _libssh2_wincng_ecdsa_decode_uncompressed_point(
         server_publickey_encoded,
         server_publickey_encoded_len,
+        &server_publickey);
+    if (result != LIBSSH2_ERROR_NONE) {
+        return result;
+    }
+
+    result = _libssh2_wincng_publickey_from_uncompressed_point(
+        WINCNG_KEYTYPE_ECDH,
+        &server_publickey,
         &curve,
         &publickey_handle);
     if (result != LIBSSH2_ERROR_NONE) {
@@ -2417,10 +2472,11 @@ _libssh2_wincng_ecdsa_new_private(
 
     file_handle = fopen(filename, FOPEN_READTEXT);
     if (!file_handle) {
-        return _libssh2_error(
+        result = _libssh2_error(
             session,
             LIBSSH2_ERROR_INVAL,
             "Opening the private key file failed");
+        goto cleanup;
     }
 
     result = _libssh2_pem_parse(session,
@@ -2430,6 +2486,9 @@ _libssh2_wincng_ecdsa_new_private(
         file_handle,
         &data,
         &datalen);
+    if (result != LIBSSH2_ERROR_NONE) {
+        goto cleanup;
+    }
 
     result = _libssh2_wincng_ecdsa_new_private_frommemory(
         key,
@@ -2437,6 +2496,9 @@ _libssh2_wincng_ecdsa_new_private(
         data,
         datalen,
         passphrase);
+    if (result != LIBSSH2_ERROR_NONE) {
+        goto cleanup;
+    }
 
 cleanup:
     if (file_handle) {
@@ -2516,7 +2578,7 @@ _libssh2_wincng_parse_ecdsa_privatekey(
     }
 
     /* Read d */
-    result = _libssh2_get_bignum_bytes(&data_buffer, &d, &d_len);
+    //result = _libssh2_get_bignum_bytes(&data_buffer, &d, &d_len);
     if (result != LIBSSH2_ERROR_NONE) {
         goto cleanup;
     }
