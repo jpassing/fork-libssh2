@@ -2830,56 +2830,79 @@ _libssh2_wincng_ecdsa_sign(
     OUT unsigned char** signature,
     OUT size_t* signature_len)
 {
-    unsigned char* data, * sig;
-    ULONG cbData, datalen, siglen;
-    int ret;
+    NTSTATUS status;
+    int result = LIBSSH2_ERROR_NONE;
 
-    datalen = (ULONG)hash_len; // TODO: redundant?
-    data = malloc(datalen);
-    if (!data) {
-        return -1;
-    }
-    memcpy(data, hash, datalen);
+    unsigned char* cng_signature = NULL;
+    ULONG cng_signature_len;
 
-    ret = BCryptSignHash(
+    unsigned char* signature_ptr;
+
+    *signature = NULL;
+    *signature_len = 0;
+
+    status = BCryptSignHash(
         key->handle,
         NULL,
-        data,
-        datalen,
+        hash,
+        (ULONG)hash_len,
         NULL,
         0,
-        &cbData,
+        &cng_signature_len,
         0);
-    if (BCRYPT_SUCCESS(ret)) {
-        siglen = cbData;
-        sig = LIBSSH2_ALLOC(session, siglen);
-        if (sig) {
-            ret = BCryptSignHash(
-                key->handle,
-                NULL,
-                data,
-                datalen,
-                sig,
-                siglen,
-                &cbData,
-                0);
-            if (BCRYPT_SUCCESS(ret)) {
-                *signature_len = siglen;
-                *signature = sig;
-
-                //TODO: convert signature format
-            }
-            else {
-                LIBSSH2_FREE(session, sig);
-            }
-        }
-        else
-            ret = STATUS_NO_MEMORY;
+    if (!BCRYPT_SUCCESS(status)) {
+        result = LIBSSH2_ERROR_PUBLICKEY_PROTOCOL;
+        goto cleanup;
     }
 
-    _libssh2_wincng_safe_free(data, datalen);
+    cng_signature = LIBSSH2_ALLOC(session, cng_signature_len);
+    if (!cng_signature) {
+        result = LIBSSH2_ERROR_ALLOC;
+        goto cleanup;
+    }
 
-    return BCRYPT_SUCCESS(ret) ? 0 : -1;
+    status = BCryptSignHash(
+        key->handle,
+        NULL,
+        hash,
+        (ULONG)hash_len,
+        cng_signature,
+        cng_signature_len,
+        &cng_signature_len,
+        0);
+    if (!BCRYPT_SUCCESS(status)) {
+        result = LIBSSH2_ERROR_PUBLICKEY_PROTOCOL;
+        goto cleanup;
+    }
+
+    /*
+        cng_signature is in IEEE P-1163 format: r || s.
+        Convert to ecdsa_signature_blob: mpint(r) || mpint(s)
+    */
+
+    *signature_len =
+        cng_signature_len / 2 + 5 + /* mpint(r) */
+        cng_signature_len / 2 + 5;  /* mpint(s) */
+
+    *signature = LIBSSH2_ALLOC(session, *signature_len);
+    signature_ptr = *signature;
+
+    _libssh2_store_bignum2_bytes(
+        &signature_ptr,
+        cng_signature,
+        cng_signature_len / 2);
+
+    _libssh2_store_bignum2_bytes(
+        &signature_ptr,
+        cng_signature + (cng_signature_len / 2),
+        cng_signature_len / 2);
+
+cleanup:
+    if (cng_signature) {
+        LIBSSH2_FREE(session, cng_signature);
+    }
+
+    return result;
 }
 
 /*
