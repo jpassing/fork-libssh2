@@ -1788,7 +1788,7 @@ _libssh2_wincng_dsa_free(libssh2_dsa_ctx *dsa)
 
 /*******************************************************************/
 /*
- * Windows CNG backend: ECDSA functions
+ * Windows CNG backend: ECDSA helper functions
  */
 
 #if LIBSSH2_ECDSA
@@ -1838,6 +1838,71 @@ _libssh2_wincng_ecdsa_decode_uncompressed_point(
 
     point->y = point->x + point->x_len;
     point->y_len = key_length / 8;
+
+    return LIBSSH2_ERROR_NONE;
+}
+
+/*
+ * Create a IEEE P-1363 signature from a point.
+ */
+static int
+_libssh2_wincng_p1363signature_from_point(
+    IN const unsigned char* r,
+    IN size_t r_len,
+    IN const unsigned char* s,
+    IN size_t s_len,
+    IN libssh2_curve_type curve,
+    OUT PUCHAR* signature,
+    OUT size_t* signature_length)
+{
+    const unsigned char* r_trimmed;
+    const unsigned char* s_trimmed;
+    size_t r_trimmed_len;
+    size_t s_trimmed_len;
+
+    /* IEEE P-1363 format is defined as r || s.
+
+       But r and s are of type mpint. This means:
+       - there might be a leading zero that must be trimmed
+       - we might need to zero-pad the value
+    */
+
+    /* Validate parameters */
+    if (curve >= _countof(_libssh2_wincng_ecdsa_algorithms)) {
+        return LIBSSH2_ERROR_INVAL;
+    }
+
+    *signature_length = _libssh2_wincng_ecdsa_algorithms[curve].key_length * 2 / 8;
+
+    /* Trim leading zero, if any */
+    r_trimmed = r;
+    r_trimmed_len = r_len;
+    if (r_len > 0 && r[0] == '\0') {
+        r_trimmed++;
+        r_trimmed_len--;
+    }
+
+    s_trimmed = s;
+    s_trimmed_len = s_len;
+    if (s_len > 0 && s[0] == '\0') {
+        s_trimmed++;
+        s_trimmed_len--;
+    }
+
+    /* Concatenate into zero-filled buffer, zero-padding if necessary */
+    *signature = calloc(1, *signature_length);
+    if (!*signature) {
+        return LIBSSH2_ERROR_ALLOC;
+    }
+
+    memcpy(
+        *signature + (*signature_length / 2) - r_trimmed_len,
+        r_trimmed,
+        r_trimmed_len);
+    memcpy(
+        *signature + (*signature_length) - s_trimmed_len,
+        s_trimmed,
+        s_trimmed_len);
 
     return LIBSSH2_ERROR_NONE;
 }
@@ -2074,6 +2139,11 @@ _libssh_wincng_reverse_bytes(
         end--;
     }
 }
+
+/*******************************************************************/
+/*
+ * Windows CNG backend: ECDSA functions
+ */
 
 void
 _libssh2_wincng_ecdsa_free(IN _libssh2_wincng_ecdsa_key* key)
@@ -2341,68 +2411,6 @@ cleanup:
     }
 
     return result;
-}
-
-
-static int _libssh2_wincng_p1363signature_from_point(
-    IN const unsigned char* r,
-    IN size_t r_len,
-    IN const unsigned char* s,
-    IN size_t s_len,
-    IN libssh2_curve_type curve,
-    OUT PUCHAR *signature,
-    OUT size_t *signature_length)
-{
-    const unsigned char* r_trimmed;
-    const unsigned char* s_trimmed;
-    size_t r_trimmed_len;
-    size_t s_trimmed_len;
-
-    /* IEEE P-1363 format is defined as r || s.
-
-       But r and s are of type mpint. This means:
-       - there might be a leading zero that must be trimmed
-       - we might need to zero-pad the value
-    */
-
-    /* Validate parameters */
-    if (curve >= _countof(_libssh2_wincng_ecdsa_algorithms)) {
-        return LIBSSH2_ERROR_INVAL;
-    }
-
-    *signature_length = _libssh2_wincng_ecdsa_algorithms[curve].key_length * 2 / 8;
-
-    /* Trim leading zero, if any */
-    r_trimmed = r;
-    r_trimmed_len = r_len;
-    if (r_len > 0 && r[0] == '\0') {
-        r_trimmed++;
-        r_trimmed_len--;
-    }
-
-    s_trimmed = s;
-    s_trimmed_len = s_len;
-    if (s_len > 0 && s[0] == '\0') {
-        s_trimmed++;
-        s_trimmed_len--;
-    }
-
-    /* Concatenate into zero-filled buffer, zero-padding if necessary */
-    *signature = calloc(1, *signature_length);
-    if (!*signature) {
-        return LIBSSH2_ERROR_ALLOC;
-    }
-
-    memcpy(
-        *signature + (*signature_length / 2) - r_trimmed_len,
-        r_trimmed,
-        r_trimmed_len);
-    memcpy(
-        *signature + (*signature_length) - s_trimmed_len,
-        s_trimmed,
-        s_trimmed_len);
-
-    return LIBSSH2_ERROR_NONE;
 }
 
 /*
@@ -2932,7 +2940,7 @@ cleanup:
  */
 
 libssh2_curve_type
-_libssh2_wincng_ecdsa_get_curve_type(_libssh2_wincng_ecdsa_key* key)
+_libssh2_wincng_ecdsa_get_curve_type(IN _libssh2_wincng_ecdsa_key* key)
 {
     return key->curve;
 }
