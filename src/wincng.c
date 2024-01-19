@@ -2736,7 +2736,6 @@ _libssh2_wincng_ecdsa_new_private_frommemory(
             "Passphrase-protected ECDSA private key files are unsupported");
     }
 
-
     /* ECDSA private key files use the decoding defined in PROTOCOL.key */
 
     /* Read AUTH_MAGIC */
@@ -2835,6 +2834,7 @@ _libssh2_wincng_ecdsa_sign(
     unsigned char* cng_signature = NULL;
     ULONG cng_signature_len;
 
+    ULONG signature_maxlen;
     unsigned char* signature_ptr;
 
     *signature = NULL;
@@ -2879,11 +2879,11 @@ _libssh2_wincng_ecdsa_sign(
         Convert to ecdsa_signature_blob: mpint(r) || mpint(s)
     */
 
-    *signature_len =
+    signature_maxlen =
         cng_signature_len / 2 + 5 + /* mpint(r) */
         cng_signature_len / 2 + 5;  /* mpint(s) */
 
-    *signature = LIBSSH2_ALLOC(session, *signature_len);
+    *signature = LIBSSH2_ALLOC(session, signature_maxlen);
     signature_ptr = *signature;
 
     _libssh2_store_bignum2_bytes(
@@ -2895,6 +2895,8 @@ _libssh2_wincng_ecdsa_sign(
         &signature_ptr,
         cng_signature + (cng_signature_len / 2),
         cng_signature_len / 2);
+
+    *signature_len = signature_ptr - *signature;
 
 cleanup:
     if (cng_signature) {
