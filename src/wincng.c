@@ -256,7 +256,6 @@ typedef enum {
     WINCNG_ECC_KEYTYPE_ECDH = 1,
 } _libssh2_wincng_ecc_keytype;
 
-// TODO: Merge into _libssh2_wincng_ctx?
 typedef struct __libssh2_wincng_ecdsa_algorithm {
     /* Algorithm name */
     char* name;
@@ -493,7 +492,6 @@ _libssh2_wincng_init(void)
         if (BCRYPT_SUCCESS(ret)) {
             _libssh2_wincng.hAlgECDH[curve] = alg_handle_ecdh;
         }
-        // TODO: Close handles.
     }
 #endif
 }
@@ -2323,7 +2321,6 @@ _libssh2_wincng_ecdh_gen_k(
     /* BCRYPT_KDF_RAW_SECRET returns the little-endian representation of the raw
      * secret, so we need to swap it to big endian order. */
 
-    //TODO: use _libssh2_wincng_bignum_from_bin instead?
     _libssh_wincng_reverse_bytes((*secret)->bignum, secret_len);
 
     result = LIBSSH2_ERROR_NONE;
@@ -2460,7 +2457,7 @@ _libssh2_wincng_ecdsa_verify(
     }
 
     /* Create hash over m */
-    switch (_libssh2_wincng_ecdsa_get_curve_type(key))  //TODO: use table.
+    switch (_libssh2_wincng_ecdsa_get_curve_type(key))
     {
     case LIBSSH2_EC_CURVE_NISTP256:
         hash_len = 256/8;
@@ -2519,7 +2516,7 @@ cleanup:
     }
 
     if (signature_p1363) {
-        free(signature_p1363); //TODO: use safe free
+        free(signature_p1363);
     }
 
     return result;
