@@ -241,6 +241,9 @@
 #define PKCS_RSA_PRIVATE_KEY ((LPCSTR)(size_t)43)
 #endif
 
+static int
+_libssh2_wincng_bignum_resize(_libssh2_bn* bn, ULONG length);
+
 /*******************************************************************/
 /*
  * Windows CNG backend: Generic functions
@@ -2082,7 +2085,7 @@ _libssh2_wincng_ecdh_create_key(
 
     int result = LIBSSH2_ERROR_NONE;
     NTSTATUS status;
-    BCRYPT_KEY_HANDLE key_handle;
+    BCRYPT_KEY_HANDLE key_handle = NULL;
 
     /* Validate parameters */
     if (curve >= _countof(_libssh2_ecdsa_algorithms)) {
@@ -2531,13 +2534,11 @@ _libssh2_wincng_ecdsa_new_private(
         return LIBSSH2_ERROR_INVAL;
     }
 
-    if (passphrase != NULL && strlen(passphrase) > 0) {
+    if (passphrase != NULL && strlen((const char*)passphrase) > 0) {
         return _libssh2_error(
             session,
             LIBSSH2_ERROR_INVAL,
             "Passphrase-protected ECDSA private key files are unsupported");
-
-        return LIBSSH2_ERROR_INVAL;
     }
 
     file_handle = fopen(filename, FOPEN_READTEXT);
@@ -2563,7 +2564,7 @@ _libssh2_wincng_ecdsa_new_private(
     result = _libssh2_wincng_ecdsa_new_private_frommemory(
         key,
         session,
-        data,
+        (const char*)data,
         datalen,
         passphrase);
     if (result != LIBSSH2_ERROR_NONE) {
@@ -2590,7 +2591,7 @@ _libssh2_wincng_parse_ecdsa_privatekey(
     IN unsigned char* privatekey,
     IN size_t privatekey_len)
 {
-    unsigned char* keytype;
+    char* keytype;
     size_t keytype_len;
 
     unsigned char* ignore;
@@ -2601,7 +2602,7 @@ _libssh2_wincng_parse_ecdsa_privatekey(
 
     libssh2_curve_type curve_type;
     int result;
-    int check1, check2;
+    uint32_t check1, check2;
     struct string_buf data_buffer;
 
     _libssh2_ecdsa_point q;
@@ -2635,7 +2636,7 @@ _libssh2_wincng_parse_ecdsa_privatekey(
     /* What follows is a key as defined in draft-miller-ssh-agent, section-3.2.2 */
 
     /* Read the key type */
-    result = _libssh2_get_string(&data_buffer, &keytype, &keytype_len);
+    result = _libssh2_get_string(&data_buffer, (unsigned char**)& keytype, &keytype_len);
     if (result != LIBSSH2_ERROR_NONE) {
         goto cleanup;
     }
@@ -2728,13 +2729,11 @@ _libssh2_wincng_ecdsa_new_private_frommemory(
         return LIBSSH2_ERROR_INVAL;
     }
 
-    if (passphrase != NULL && strlen(passphrase) > 0) {
+    if (passphrase != NULL && strlen((const char*)passphrase) > 0) {
         return _libssh2_error(
             session,
             LIBSSH2_ERROR_INVAL,
             "Passphrase-protected ECDSA private key files are unsupported");
-
-        return LIBSSH2_ERROR_INVAL;
     }
 
 
@@ -2746,7 +2745,7 @@ _libssh2_wincng_ecdsa_new_private_frommemory(
         goto cleanup;
     }
 
-    data_buffer.data = data;
+    data_buffer.data = (unsigned char*)data;
     data_buffer.dataptr = data + strlen(AUTH_MAGIC) + 1;
     data_buffer.len = data_len;
 
@@ -2780,7 +2779,7 @@ _libssh2_wincng_ecdsa_new_private_frommemory(
     }
 
     /* Skip all public keys */
-    for (int i = 0; i < key_count; i++) {
+    for (uint32_t i = 0; i < key_count; i++) {
         unsigned char* publickey;
         size_t publickey_len;
 
