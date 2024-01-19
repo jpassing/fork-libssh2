@@ -263,8 +263,8 @@ typedef struct __libssh2_wincng_ecdsa_algorithm {
     /* Key length, in bits */
     ULONG key_length;
 
-    /* CNG name of algorithm, indexed by _libssh2_wincng_ecc_keytype */
-    LPCWSTR algorithm_name[2];
+    /* Name of CNG algorithm provider, indexed by _libssh2_wincng_ecc_keytype */
+    LPCWSTR provider_name[2];
 
     /* Magic for public key import, indexed by _libssh2_wincng_ecc_keytype */
     ULONG public_import_magic[2];
@@ -477,7 +477,7 @@ _libssh2_wincng_init(void)
 
         ret = BCryptOpenAlgorithmProvider(
             &alg_handle_ecdsa,
-            _libssh2_wincng_ecdsa_algorithms[curve].algorithm_name[WINCNG_ECC_KEYTYPE_ECDSA],
+            _libssh2_wincng_ecdsa_algorithms[curve].provider_name[WINCNG_ECC_KEYTYPE_ECDSA],
             NULL,
             0);
         if (BCRYPT_SUCCESS(ret)) {
@@ -486,7 +486,7 @@ _libssh2_wincng_init(void)
 
         ret = BCryptOpenAlgorithmProvider(
             &alg_handle_ecdh,
-            _libssh2_wincng_ecdsa_algorithms[curve].algorithm_name[WINCNG_ECC_KEYTYPE_ECDH],
+            _libssh2_wincng_ecdsa_algorithms[curve].provider_name[WINCNG_ECC_KEYTYPE_ECDH],
             NULL,
             0);
         if (BCRYPT_SUCCESS(ret)) {
@@ -1793,7 +1793,10 @@ _libssh2_wincng_dsa_free(libssh2_dsa_ctx *dsa)
 
 #if LIBSSH2_ECDSA
 
-int
+/*
+ * Decode an uncompressed point.
+ */
+static int
 _libssh2_wincng_ecdsa_decode_uncompressed_point(
     IN const unsigned char* encoded_point,
     IN size_t encoded_point_len,
@@ -1805,7 +1808,7 @@ _libssh2_wincng_ecdsa_decode_uncompressed_point(
         return LIBSSH2_ERROR_INVAL;
     }
 
-    /* Verify that the poing uses uncompressed format */
+    /* Verify that the point uses uncompressed format */
     if (encoded_point_len == 0 || encoded_point[0] != 4) {
         return LIBSSH2_ERROR_INVAL;
     }
@@ -1945,8 +1948,8 @@ _libssh2_wincng_privatekey_from_point(
 
     status = BCryptImportKeyPair(
         keytype == WINCNG_ECC_KEYTYPE_ECDSA
-        ? _libssh2_wincng.hAlgECDSA[q->curve]
-        : _libssh2_wincng.hAlgECDH[q->curve],
+            ? _libssh2_wincng.hAlgECDSA[q->curve]
+            : _libssh2_wincng.hAlgECDH[q->curve],
         NULL,
         BCRYPT_ECCPRIVATE_BLOB,
         key,
@@ -1987,6 +1990,9 @@ _libssh2_wincng_uncompressed_point_from_publickey(
     if (curve >= _countof(_libssh2_wincng_ecdsa_algorithms)) {
         return LIBSSH2_ERROR_INVAL;
     }
+
+    *encoded_point = NULL;
+    *encoded_point_len = 0;
 
     /*
      * Export point as BCRYPT_ECCKEY_BLOB, a dynamically-sized structure.
