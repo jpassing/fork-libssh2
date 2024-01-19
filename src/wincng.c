@@ -2771,7 +2771,7 @@ _libssh2_wincng_ecdsa_new_private_frommemory(
     }
 
     data_buffer.data = (unsigned char*)data;
-    data_buffer.dataptr = data + strlen(AUTH_MAGIC) + 1;
+    data_buffer.dataptr = data + strlen(AUTH_MAGIC) + 1; //TODO: fix const issue
     data_buffer.len = data_len;
 
     /* Read ciphername, should be 'none' because we don't support passphrases */
@@ -2869,7 +2869,7 @@ _libssh2_wincng_ecdsa_sign(
     status = BCryptSignHash(
         key->handle,
         NULL,
-        hash,
+        hash,//TODO: fix const issue
         (ULONG)hash_len,
         NULL,
         0,
@@ -2889,7 +2889,7 @@ _libssh2_wincng_ecdsa_sign(
     status = BCryptSignHash(
         key->handle,
         NULL,
-        hash,
+        hash,//TODO: fix const issue
         (ULONG)hash_len,
         cng_signature,
         cng_signature_len,
