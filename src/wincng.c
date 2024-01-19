@@ -261,8 +261,6 @@ typedef struct __libssh2_wincng_ecdsa_algorithm {
     /* Algorithm name */
     char* name;
 
-    libssh2_curve_type curve;//TODO: remove?
-
     /* Key length, in bits */
     ULONG key_length;
 
@@ -280,7 +278,6 @@ typedef struct __libssh2_wincng_ecdsa_algorithm {
 static _libssh2_wincng_ecdsa_algorithm _libssh2_wincng_ecdsa_algorithms[] = {
     {
         "ecdsa-sha2-nistp256",
-        LIBSSH2_EC_CURVE_NISTP256,
         256,
         { BCRYPT_ECDSA_P256_ALGORITHM, BCRYPT_ECDH_P256_ALGORITHM },
         { BCRYPT_ECDSA_PUBLIC_P256_MAGIC, BCRYPT_ECDH_PUBLIC_P256_MAGIC },
@@ -288,7 +285,6 @@ static _libssh2_wincng_ecdsa_algorithm _libssh2_wincng_ecdsa_algorithms[] = {
     },
     {
         "ecdsa-sha2-nistp384",
-        LIBSSH2_EC_CURVE_NISTP384,
         384,
         { BCRYPT_ECDSA_P384_ALGORITHM, BCRYPT_ECDH_P384_ALGORITHM },
         { BCRYPT_ECDSA_PUBLIC_P384_MAGIC, BCRYPT_ECDH_PUBLIC_P384_MAGIC },
@@ -296,7 +292,6 @@ static _libssh2_wincng_ecdsa_algorithm _libssh2_wincng_ecdsa_algorithms[] = {
     },
     {
         "ecdsa-sha2-nistp521",
-        LIBSSH2_EC_CURVE_NISTP521,
         521,
         { BCRYPT_ECDSA_P521_ALGORITHM, BCRYPT_ECDH_P521_ALGORITHM },
         { BCRYPT_ECDSA_PUBLIC_P521_MAGIC, BCRYPT_ECDH_PUBLIC_P521_MAGIC },
@@ -2414,11 +2409,11 @@ static int _libssh2_wincng_p1363signature_from_point(
 int
 _libssh2_wincng_ecdsa_curve_type_from_name(
     IN const char* name,
-    OUT libssh2_curve_type* curve)
+    OUT libssh2_curve_type* out_curve)
 {
-    for (int i = 0; i < _countof(_libssh2_wincng_ecdsa_algorithms); i++) { //TODO: rename i to curve
-        if (strcmp(name, _libssh2_wincng_ecdsa_algorithms[i].name) == 0) {
-            *curve = _libssh2_wincng_ecdsa_algorithms[i].curve;
+    for (int curve = 0; curve < _countof(_libssh2_wincng_ecdsa_algorithms); curve++) {
+        if (strcmp(name, _libssh2_wincng_ecdsa_algorithms[curve].name) == 0) {
+            *out_curve = curve;
             return LIBSSH2_ERROR_NONE;
         }
     }
