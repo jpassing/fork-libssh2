@@ -65,6 +65,7 @@
 #include <math.h>
 
 #include <stdlib.h>
+#include <assert.h>
 
 #ifdef HAVE_LIBCRYPT32
 #include <wincrypt.h>  /* for CryptDecodeObjectEx() */
@@ -263,6 +264,9 @@ typedef struct __libssh2_wincng_ecdsa_algorithm {
     /* Key length, in bits */
     ULONG key_length;
 
+    /* Length of each point, in bytes */
+    ULONG point_length;
+
     /* Name of CNG algorithm provider, indexed by _libssh2_wincng_ecc_keytype */
     LPCWSTR provider_name[2];
 
@@ -278,6 +282,7 @@ static _libssh2_wincng_ecdsa_algorithm _libssh2_wincng_ecdsa_algorithms[] = {
     {
         "ecdsa-sha2-nistp256",
         256,
+        256 / 8,
         { BCRYPT_ECDSA_P256_ALGORITHM, BCRYPT_ECDH_P256_ALGORITHM },
         { BCRYPT_ECDSA_PUBLIC_P256_MAGIC, BCRYPT_ECDH_PUBLIC_P256_MAGIC },
         { BCRYPT_ECDSA_PRIVATE_P256_MAGIC, BCRYPT_ECDH_PRIVATE_P256_MAGIC }
@@ -285,6 +290,7 @@ static _libssh2_wincng_ecdsa_algorithm _libssh2_wincng_ecdsa_algorithms[] = {
     {
         "ecdsa-sha2-nistp384",
         384,
+        384 / 8,
         { BCRYPT_ECDSA_P384_ALGORITHM, BCRYPT_ECDH_P384_ALGORITHM },
         { BCRYPT_ECDSA_PUBLIC_P384_MAGIC, BCRYPT_ECDH_PUBLIC_P384_MAGIC },
         { BCRYPT_ECDSA_PRIVATE_P384_MAGIC, BCRYPT_ECDH_PRIVATE_P384_MAGIC }
@@ -292,6 +298,7 @@ static _libssh2_wincng_ecdsa_algorithm _libssh2_wincng_ecdsa_algorithms[] = {
     {
         "ecdsa-sha2-nistp521",
         521,
+        ((521 + 7) & ~7) / 8,
         { BCRYPT_ECDSA_P521_ALGORITHM, BCRYPT_ECDH_P521_ALGORITHM },
         { BCRYPT_ECDSA_PUBLIC_P521_MAGIC, BCRYPT_ECDH_PUBLIC_P521_MAGIC },
         { BCRYPT_ECDSA_PRIVATE_P521_MAGIC, BCRYPT_ECDH_PRIVATE_P521_MAGIC }
@@ -1813,33 +1820,21 @@ _libssh2_wincng_ecdsa_decode_uncompressed_point(
         return LIBSSH2_ERROR_INVAL;
     }
 
-    /* Get key length in bits */
-    key_length = (encoded_point_len - 1) / 2 * 8;
-    switch (key_length)
-    {
-    case 256:
-        point->curve = LIBSSH2_EC_CURVE_NISTP256;
-        break;
+    for (int curve = 0; curve < _countof(_libssh2_wincng_ecdsa_algorithms); curve++) {
+        if (_libssh2_wincng_ecdsa_algorithms[curve].point_length == (encoded_point_len - 1) / 2) {
+            point->curve = curve;
 
-    case 384:
-        point->curve = LIBSSH2_EC_CURVE_NISTP384;
-        break;
+            point->x = encoded_point + 1;
+            point->x_len = _libssh2_wincng_ecdsa_algorithms[curve].point_length;
 
-    case 521: // TODO: is this correct? Use (key_length + 7) / 8?
-        point->curve = LIBSSH2_EC_CURVE_NISTP521;
-        break;
+            point->y = point->x + point->x_len;
+            point->y_len = _libssh2_wincng_ecdsa_algorithms[curve].point_length;
 
-    default:
-        return LIBSSH2_ERROR_INVAL;
+            return LIBSSH2_ERROR_NONE;
+        }
     }
 
-    point->x = encoded_point + 1;
-    point->x_len = key_length / 8;
-
-    point->y = point->x + point->x_len;
-    point->y_len = key_length / 8;
-
-    return LIBSSH2_ERROR_NONE;
+    return LIBSSH2_ERROR_INVAL;
 }
 
 /*
@@ -1872,7 +1867,7 @@ _libssh2_wincng_p1363signature_from_point(
         return LIBSSH2_ERROR_INVAL;
     }
 
-    *signature_length = _libssh2_wincng_ecdsa_algorithms[curve].key_length * 2 / 8;
+    *signature_length = _libssh2_wincng_ecdsa_algorithms[curve].point_length * 2;
 
     /* Trim leading zero, if any */
     r_trimmed = r;
@@ -1924,6 +1919,8 @@ _libssh2_wincng_publickey_from_point(
 
     *key = NULL;
 
+    assert(point->x_len == point->y_len);
+
     /* Initialize a blob to import */
     ecc_blob_len = sizeof(BCRYPT_ECCKEY_BLOB) + point->x_len + point->y_len;
     ecc_blob = malloc(ecc_blob_len);
@@ -1932,7 +1929,7 @@ _libssh2_wincng_publickey_from_point(
     }
 
     ecc_blob->dwMagic = _libssh2_wincng_ecdsa_algorithms[point->curve].public_import_magic[keytype];
-    ecc_blob->cbKey = _libssh2_wincng_ecdsa_algorithms[point->curve].key_length / 8;
+    ecc_blob->cbKey = point->x_len;
 
     /** Copy x, y */
     memcpy(
@@ -1985,6 +1982,8 @@ _libssh2_wincng_privatekey_from_point(
 
     *key = NULL;
 
+    assert(q->x_len == q->y_len);
+
     /* Initialize a blob to import */
     ecc_blob_len = sizeof(BCRYPT_ECCPRIVATE_BLOB) + q->x_len + q->y_len + d_len;
     ecc_blob = malloc(ecc_blob_len);
@@ -1993,7 +1992,7 @@ _libssh2_wincng_privatekey_from_point(
     }
 
     ecc_blob->dwMagic = _libssh2_wincng_ecdsa_algorithms[q->curve].private_import_magic[keytype];
-    ecc_blob->cbKey = _libssh2_wincng_ecdsa_algorithms[q->curve].key_length / 8;
+    ecc_blob->cbKey = q->x_len;
 
     /* Copy x, y */
     memcpy(
